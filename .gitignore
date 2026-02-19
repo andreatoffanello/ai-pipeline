@@ -1,0 +1,13 @@
+# Pipeline working files — non versionare i dati di lavorazione
+logs/
+state.json
+briefs/
+specs/
+reviews/
+qa/
+verdicts/
+
+# Mantieni prompt e config
+!prompts/
+!pipeline.yaml
+!.mcp.json
