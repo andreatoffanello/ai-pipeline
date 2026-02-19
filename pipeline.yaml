@@ -1,0 +1,71 @@
+# pipeline.yaml — AI Pipeline Configuration
+# Personalizza questo file per il tuo progetto.
+# Copia in: my-project/ai-pipeline/pipeline.yaml
+
+pipeline:
+  name: my-project
+
+defaults:
+  provider: anthropic
+  model: claude-sonnet-4-6
+  max_retries: 2
+  allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
+  token_max_retries: 5
+  token_base_delay: 60
+
+steps:
+  - name: pm
+    description: "Product Manager — scrive la specifica"
+    prompt: prompts/pm.md
+    provider: anthropic
+    model: claude-opus-4-6
+    allowed_tools: "Read,Write,Edit,Glob,Grep"
+    mcp_servers: []
+    output: specs/${FEATURE}.md
+    verdict: false
+
+  - name: dr-spec
+    description: "Design Reviewer — valida la specifica"
+    prompt: prompts/dr-spec.md
+    provider: anthropic
+    model: claude-sonnet-4-6
+    allowed_tools: "Read,Write,Edit,Glob,Grep"
+    mcp_servers: []
+    output: reviews/${FEATURE}-spec.md
+    verdict: true
+    on_reject: pm
+
+  - name: dev
+    description: "Developer — implementa"
+    prompt: prompts/dev.md
+    provider: anthropic
+    model: claude-sonnet-4-6
+    allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
+    mcp_servers: []
+    output: ""
+    verdict: false
+
+  - name: qa
+    description: "QA — verifica i criteri di accettazione"
+    prompt: prompts/qa.md
+    provider: anthropic
+    model: claude-sonnet-4-6
+    allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
+    mcp_servers:
+      - playwright
+    output: qa/${FEATURE}-qa.md
+    verdict: true
+    on_reject: dev
+
+providers:
+  anthropic:
+    base_url: ""
+    api_key_env: ANTHROPIC_API_KEY
+
+  kimi:
+    base_url: "https://api.moonshot.ai/anthropic"
+    api_key_env: KIMI_API_KEY
+
+  ollama:
+    base_url: "http://localhost:11434/v1"
+    api_key_env: ""
