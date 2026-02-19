@@ -43,7 +43,7 @@ source "${PIPELINE_DIR}/lib/claude.sh"
 trap 'display_trap_cleanup; exit 1' INT TERM
 
 # ---------------------------------------------------------------------------
-# CLI parsing
+# CLI parsing vars
 # ---------------------------------------------------------------------------
 PIPELINE_FEATURE=""
 PIPELINE_FROM_STEP=""
@@ -54,6 +54,9 @@ PIPELINE_MODEL_OVERRIDE=""
 PIPELINE_DESCRIPTION=""
 PIPELINE_SHOW_STATE="false"
 
+# ---------------------------------------------------------------------------
+# _usage
+# ---------------------------------------------------------------------------
 _usage() {
     cat <<EOF
 
@@ -79,108 +82,8 @@ Examples:
 EOF
 }
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --from)        PIPELINE_FROM_STEP="$2"; shift 2 ;;
-        --only)        PIPELINE_ONLY_STEP="$2"; shift 2 ;;
-        --resume)      PIPELINE_RESUME="true"; shift ;;
-        --dry-run)     PIPELINE_DRY_RUN="true"; shift ;;
-        --model)       PIPELINE_MODEL_OVERRIDE="$2"; shift 2 ;;
-        --description) PIPELINE_DESCRIPTION="$2"; shift 2 ;;
-        --state)       PIPELINE_SHOW_STATE="true"; shift ;;
-        --help|-h)     _usage; exit 0 ;;
-        -*)            display_error "Opzione sconosciuta: $1"; _usage; exit 1 ;;
-        *)
-            if [[ -z "$PIPELINE_FEATURE" ]]; then
-                PIPELINE_FEATURE="$1"
-            else
-                display_error "Feature già specificata: ${PIPELINE_FEATURE}"; exit 1
-            fi
-            shift ;;
-    esac
-done
-
-export PIPELINE_FEATURE
-
 # ---------------------------------------------------------------------------
-# --state (non richiede feature)
-# ---------------------------------------------------------------------------
-if [[ "$PIPELINE_SHOW_STATE" == "true" ]]; then
-    _pipeline_show_state
-    exit 0
-fi
-
-if [[ -z "$PIPELINE_FEATURE" ]]; then
-    display_error "Feature name richiesta"
-    _usage
-    exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# Prerequisiti
-# ---------------------------------------------------------------------------
-if ! command -v claude &>/dev/null; then
-    display_error "Claude Code CLI non trovato. Installa: https://docs.anthropic.com/en/docs/claude-code"
-    exit 1
-fi
-
-if ! command -v python3 &>/dev/null; then
-    display_error "python3 richiesto ma non trovato."
-    exit 1
-fi
-
-if [[ ! -f "$PIPELINE_CONFIG_FILE" ]]; then
-    display_error "pipeline.yaml non trovato in: ${PIPELINE_DIR}"
-    display_info "Copia example/pipeline.yaml e personalizzalo."
-    exit 1
-fi
-
-config_validate || exit 1
-
-# ---------------------------------------------------------------------------
-# Crea directory necessarie
-# ---------------------------------------------------------------------------
-mkdir -p "${PIPELINE_DIR}/briefs" \
-         "${PIPELINE_DIR}/specs" \
-         "${PIPELINE_DIR}/reviews" \
-         "${PIPELINE_DIR}/qa" \
-         "${PIPELINE_DIR}/logs" \
-         "${PIPELINE_DIR}/verdicts"
-
-# ---------------------------------------------------------------------------
-# Brief management
-# ---------------------------------------------------------------------------
-if [[ -n "$PIPELINE_DESCRIPTION" ]]; then
-    echo "$PIPELINE_DESCRIPTION" > "${PIPELINE_DIR}/briefs/${PIPELINE_FEATURE}.md"
-    display_info "Brief creato: briefs/${PIPELINE_FEATURE}.md"
-fi
-
-# ---------------------------------------------------------------------------
-# Configura token retry da YAML
-# ---------------------------------------------------------------------------
-CLAUDE_TOKEN_MAX_RETRIES=$(config_get_default "defaults.token_max_retries" "5")
-CLAUDE_TOKEN_BASE_DELAY=$(config_get_default "defaults.token_base_delay" "60")
-export CLAUDE_TOKEN_MAX_RETRIES CLAUDE_TOKEN_BASE_DELAY
-
-# ---------------------------------------------------------------------------
-# --resume: trova il primo step incompleto
-# ---------------------------------------------------------------------------
-if [[ "$PIPELINE_RESUME" == "true" ]] && [[ -z "$PIPELINE_FROM_STEP" ]]; then
-    display_info "Rilevamento step completati..."
-    local_all_steps=$(config_steps_names)
-    while IFS= read -r resume_step; do
-        local_output=$(config_step_get "$resume_step" "output")
-        local_output="${local_output//\$\{FEATURE\}/$PIPELINE_FEATURE}"
-        if [[ -n "$local_output" ]] && [[ ! -f "${PIPELINE_DIR}/${local_output}" ]]; then
-            PIPELINE_FROM_STEP="$resume_step"
-            display_info "Resume da: ${resume_step}"
-            break
-        fi
-    done <<< "$local_all_steps"
-fi
-
-# ---------------------------------------------------------------------------
-# _pipeline_show_state
+# _pipeline_show_state — mostra stato corrente da state.json
 # ---------------------------------------------------------------------------
 _pipeline_show_state() {
     if [[ ! -f "$PIPELINE_STATE_FILE" ]]; then
@@ -218,6 +121,58 @@ print(s.get('status','pending'))
         esac
     done <<< "$all_steps"
     echo ""
+}
+
+# ---------------------------------------------------------------------------
+# _run_reject_step <reject_step> <gate_step> <gate_output> <provider> <model> <tools>
+# Esegue lo step di correzione quando un gate viene rifiutato.
+# ---------------------------------------------------------------------------
+_run_reject_step() {
+    local reject_step="$1"
+    local gate_step="$2"
+    local gate_output="$3"
+    local fallback_provider="$4"
+    local fallback_model="$5"
+    local fallback_tools="$6"
+
+    local reject_prompt_rel
+    reject_prompt_rel=$(config_step_get_default "$reject_step" "prompt" "prompts/${reject_step}.md")
+    local reject_prompt="${PIPELINE_DIR}/${reject_prompt_rel}"
+
+    if [[ ! -f "$reject_prompt" ]]; then
+        display_warn "Prompt on_reject non trovato: ${reject_prompt} — salto"
+        return 0
+    fi
+
+    local reject_provider reject_model reject_tools
+    reject_provider=$(config_step_get_default "$reject_step" "provider" "$fallback_provider")
+    reject_model=$(config_step_get_default "$reject_step" "model" "$fallback_model")
+    [[ -n "$PIPELINE_MODEL_OVERRIDE" ]] && reject_model="$PIPELINE_MODEL_OVERRIDE"
+    reject_tools=$(config_step_get_default "$reject_step" "allowed_tools" "$fallback_tools")
+
+    claude_setup_provider "$reject_provider" "$reject_model"
+
+    local reject_tmp
+    reject_tmp=$(mktemp /tmp/pipeline-reject.XXXXXX.md)
+    cp "$reject_prompt" "$reject_tmp"
+    sed -i.bak "s/\${FEATURE}/${PIPELINE_FEATURE}/g" "$reject_tmp"
+    rm -f "${reject_tmp}.bak"
+
+    # Inietta feedback dalla review
+    local review_file="${PIPELINE_DIR}/${gate_output}"
+    if [[ -f "$review_file" ]]; then
+        printf "\n---\nFEEDBACK dalla revisione (da correggere):\n%s\n" \
+            "$(cat "$review_file")" >> "$reject_tmp"
+    fi
+
+    display_info "Eseguo step di correzione: ${reject_step}"
+    display_box_start "$reject_step" "${reject_model:-default}"
+    claude_run "$reject_tmp" "$reject_step" "$reject_model" "$reject_tools" "" || true
+    rm -f "$reject_tmp"
+    display_box_stop
+
+    # Ripristina provider originale
+    claude_setup_provider "$fallback_provider" "$fallback_model"
 }
 
 # ---------------------------------------------------------------------------
@@ -465,58 +420,105 @@ _run_pipeline() {
 }
 
 # ---------------------------------------------------------------------------
-# _run_reject_step <reject_step> <gate_step> <gate_output> <provider> <model> <tools>
-# Esegue lo step di correzione quando un gate viene rifiutato.
+# _main — CLI parsing + validation + avvio
 # ---------------------------------------------------------------------------
-_run_reject_step() {
-    local reject_step="$1"
-    local gate_step="$2"
-    local gate_output="$3"
-    local fallback_provider="$4"
-    local fallback_model="$5"
-    local fallback_tools="$6"
+_main() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --from)        PIPELINE_FROM_STEP="$2"; shift 2 ;;
+            --only)        PIPELINE_ONLY_STEP="$2"; shift 2 ;;
+            --resume)      PIPELINE_RESUME="true"; shift ;;
+            --dry-run)     PIPELINE_DRY_RUN="true"; shift ;;
+            --model)       PIPELINE_MODEL_OVERRIDE="$2"; shift 2 ;;
+            --description) PIPELINE_DESCRIPTION="$2"; shift 2 ;;
+            --state)       PIPELINE_SHOW_STATE="true"; shift ;;
+            --help|-h)     _usage; exit 0 ;;
+            -*)            display_error "Opzione sconosciuta: $1"; _usage; exit 1 ;;
+            *)
+                if [[ -z "$PIPELINE_FEATURE" ]]; then
+                    PIPELINE_FEATURE="$1"
+                else
+                    display_error "Feature già specificata: ${PIPELINE_FEATURE}"; exit 1
+                fi
+                shift ;;
+        esac
+    done
 
-    local reject_prompt_rel
-    reject_prompt_rel=$(config_step_get_default "$reject_step" "prompt" "prompts/${reject_step}.md")
-    local reject_prompt="${PIPELINE_DIR}/${reject_prompt_rel}"
+    export PIPELINE_FEATURE
 
-    if [[ ! -f "$reject_prompt" ]]; then
-        display_warn "Prompt on_reject non trovato: ${reject_prompt} — salto"
-        return 0
+    # --state (non richiede feature)
+    if [[ "$PIPELINE_SHOW_STATE" == "true" ]]; then
+        _pipeline_show_state
+        exit 0
     fi
 
-    local reject_provider reject_model reject_tools
-    reject_provider=$(config_step_get_default "$reject_step" "provider" "$fallback_provider")
-    reject_model=$(config_step_get_default "$reject_step" "model" "$fallback_model")
-    [[ -n "$PIPELINE_MODEL_OVERRIDE" ]] && reject_model="$PIPELINE_MODEL_OVERRIDE"
-    reject_tools=$(config_step_get_default "$reject_step" "allowed_tools" "$fallback_tools")
-
-    claude_setup_provider "$reject_provider" "$reject_model"
-
-    local reject_tmp
-    reject_tmp=$(mktemp /tmp/pipeline-reject.XXXXXX.md)
-    cp "$reject_prompt" "$reject_tmp"
-    sed -i.bak "s/\${FEATURE}/${PIPELINE_FEATURE}/g" "$reject_tmp"
-    rm -f "${reject_tmp}.bak"
-
-    # Inietta feedback dalla review
-    local review_file="${PIPELINE_DIR}/${gate_output}"
-    if [[ -f "$review_file" ]]; then
-        printf "\n---\nFEEDBACK dalla revisione (da correggere):\n%s\n" \
-            "$(cat "$review_file")" >> "$reject_tmp"
+    if [[ -z "$PIPELINE_FEATURE" ]]; then
+        display_error "Feature name richiesta"
+        _usage
+        exit 1
     fi
 
-    display_info "Eseguo step di correzione: ${reject_step}"
-    display_box_start "$reject_step" "${reject_model:-default}"
-    claude_run "$reject_tmp" "$reject_step" "$reject_model" "$reject_tools" "" || true
-    rm -f "$reject_tmp"
-    display_box_stop
+    # ---------------------------------------------------------------------------
+    # Prerequisiti
+    # ---------------------------------------------------------------------------
+    if ! command -v claude &>/dev/null; then
+        display_error "Claude Code CLI non trovato. Installa: https://docs.anthropic.com/en/docs/claude-code"
+        exit 1
+    fi
 
-    # Ripristina provider originale
-    claude_setup_provider "$fallback_provider" "$fallback_model"
+    if ! command -v python3 &>/dev/null; then
+        display_error "python3 richiesto ma non trovato."
+        exit 1
+    fi
+
+    if [[ ! -f "$PIPELINE_CONFIG_FILE" ]]; then
+        display_error "pipeline.yaml non trovato in: ${PIPELINE_DIR}"
+        display_info "Copia example/pipeline.yaml e personalizzalo."
+        exit 1
+    fi
+
+    config_validate || exit 1
+
+    # Crea directory necessarie
+    mkdir -p "${PIPELINE_DIR}/briefs" \
+             "${PIPELINE_DIR}/specs" \
+             "${PIPELINE_DIR}/reviews" \
+             "${PIPELINE_DIR}/qa" \
+             "${PIPELINE_DIR}/logs" \
+             "${PIPELINE_DIR}/verdicts"
+
+    # Brief management
+    if [[ -n "$PIPELINE_DESCRIPTION" ]]; then
+        echo "$PIPELINE_DESCRIPTION" > "${PIPELINE_DIR}/briefs/${PIPELINE_FEATURE}.md"
+        display_info "Brief creato: briefs/${PIPELINE_FEATURE}.md"
+    fi
+
+    # Configura token retry da YAML
+    CLAUDE_TOKEN_MAX_RETRIES=$(config_get_default "defaults.token_max_retries" "5")
+    CLAUDE_TOKEN_BASE_DELAY=$(config_get_default "defaults.token_base_delay" "60")
+    export CLAUDE_TOKEN_MAX_RETRIES CLAUDE_TOKEN_BASE_DELAY
+
+    # --resume: trova il primo step incompleto
+    if [[ "$PIPELINE_RESUME" == "true" ]] && [[ -z "$PIPELINE_FROM_STEP" ]]; then
+        display_info "Rilevamento step completati..."
+        local all_steps_resume
+        all_steps_resume=$(config_steps_names)
+        while IFS= read -r resume_step; do
+            local resume_output
+            resume_output=$(config_step_get "$resume_step" "output")
+            resume_output="${resume_output//\$\{FEATURE\}/$PIPELINE_FEATURE}"
+            if [[ -n "$resume_output" ]] && [[ ! -f "${PIPELINE_DIR}/${resume_output}" ]]; then
+                PIPELINE_FROM_STEP="$resume_step"
+                display_info "Resume da: ${resume_step}"
+                break
+            fi
+        done <<< "$all_steps_resume"
+    fi
+
+    _run_pipeline
 }
 
 # ---------------------------------------------------------------------------
 # Avvia
 # ---------------------------------------------------------------------------
-_run_pipeline
+_main "$@"
