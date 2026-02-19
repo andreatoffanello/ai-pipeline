@@ -25,7 +25,8 @@ claude_setup_provider() {
     fi
 
     if [[ -n "$api_key_env" ]]; then
-        local api_key="${!api_key_env}"
+        local api_key
+        eval "api_key=\${${api_key_env}:-}"
         if [[ -z "$api_key" ]]; then
             display_warn "Provider ${provider}: env var ${api_key_env} not set"
         else
