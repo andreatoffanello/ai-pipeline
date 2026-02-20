@@ -58,6 +58,21 @@ steps:
     verdict: false
     playwright: false
 
+  - name: dr-impl
+    description: "Design Reviewer — valida l'implementazione"
+    prompt: prompts/dr-impl.md
+    prompt_section: "DR-IMPL (Design Reviewer - Implementazione)"
+    provider: anthropic
+    model: claude-sonnet-4-6
+    allowed_tools: "Read,Write,Edit,Glob,Grep"
+    mcp_servers:
+      - playwright
+    output: reviews/${FEATURE}-impl.md
+    verdict: true
+    on_reject: dev
+    retry_step: dev
+    playwright: true
+
   - name: qa
     description: "QA — verifica i criteri di accettazione"
     prompt: prompts/qa.md
@@ -69,9 +84,21 @@ steps:
       - playwright
     output: qa/${FEATURE}-qa.md
     verdict: true
-    on_reject: dev
-    retry_step: dev
+    on_reject: dev-fix
+    retry_step: dev-fix
     playwright: true
+
+  - name: dev-fix
+    description: "Developer — corregge da feedback QA"
+    prompt: prompts/dev-fix.md
+    prompt_section: "DEV-FIX (Developer Fix)"
+    provider: anthropic
+    model: claude-sonnet-4-6
+    allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
+    mcp_servers: []
+    output: ""
+    verdict: false
+    playwright: false
 
 providers:
   anthropic:
