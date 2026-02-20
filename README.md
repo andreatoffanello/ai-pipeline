@@ -16,7 +16,8 @@ cp -r ai-pipeline/ my-project/ai-pipeline/
 cd my-project/ai-pipeline
 
 # Personalizza pipeline.yaml con il tuo progetto e i tuoi step
-# Crea i prompt in prompts/ (vedi example/prompts/ come riferimento)
+# Opzione A: crea i prompt in prompts/<step>.md (un file per agente)
+# Opzione B: crea prompts.md con sezioni ## per ogni agente (vedi sotto)
 # Aggiungi le API key al .env del progetto
 ```
 
@@ -25,6 +26,11 @@ cd my-project/ai-pipeline
 ```bash
 # Feature nuova con brief inline
 ./ai-pipeline/pipeline.sh button-outline \
+  --description "Aggiungere variante outline al Button"
+
+# Target app/layer specifico (esposto a prompt_build)
+./ai-pipeline/pipeline.sh button-outline \
+  --app my-app \
   --description "Aggiungere variante outline al Button"
 
 # Feature con brief file in briefs/
@@ -58,11 +64,14 @@ ai-pipeline/
 ├── .mcp.json            # MCP server disponibili
 ├── lib/
 │   ├── config.sh        # Parsing YAML
-│   ├── display.sh       # UI terminale (box, spinner, semi-log)
-│   ├── claude.sh        # Claude CLI execution
+│   ├── display.sh       # UI terminale (box, spinner, colori tool)
+│   ├── claude.sh        # Claude CLI execution + file change tracking
 │   ├── state.sh         # State management
-│   └── verdict.sh       # Gate logic
-├── prompts/             # Un file .md per agente (creare)
+│   ├── verdict.sh       # Gate logic
+│   ├── prompt.sh        # Assemblaggio prompt (prompts.md o file statici)
+│   └── playwright.sh    # Dev server check + visual verification
+├── prompts/             # Un file .md per agente (usati se prompts.md assente)
+├── prompts.md           # Alternativa: tutti i prompt in un file con sezioni ##
 └── example/             # Template e prompt di esempio
     └── prompts/
 ```
@@ -103,22 +112,69 @@ steps:
       - playwright
 ```
 
+## Prompt: due modalità
+
+**Modalità A — file statici** (default): un file `.md` per step in `prompts/`.
+
+**Modalità B — `prompts.md`**: un unico file con sezioni `## <NomeSezione>` e fence code block. Configura `prompt_section` per step in `pipeline.yaml`:
+
+```yaml
+steps:
+  - name: pm
+    prompt_section: "PM (Product Manager)"
+```
+
+`lib/prompt.sh` sceglie automaticamente la modalità in base all'esistenza di `prompts.md`.
+
+## Playwright (dev server)
+
+Gli step con `playwright: true` in `pipeline.yaml` richiedono il dev server attivo. La pipeline verifica la connessione prima di partire e inietta nel prompt l'istruzione obbligatoria di verifica visiva con browser.
+
+```yaml
+steps:
+  - name: qa
+    playwright: true
+    mcp_servers:
+      - playwright
+```
+
+Configura la porta in `pipeline.yaml`:
+
+```yaml
+project:
+  dev_port: 3000
+```
+
 ## Display terminale
 
-Durante l'esecuzione ogni step attivo mostra un box live con spinner Braille, elapsed time e le ultime 5 tool calls in formato semi-log:
+Header con timestamp e progress bar per step:
 
 ```
-  ┌─ dev (claude-sonnet-4-6) ────────────────────── 4m12s ──┐
-  │ ⠸ Lavorando...                                           │
-  │                                                          │
-  │ ~ Write    ButtonOutline.vue                             │
-  │ ~ Write    ButtonOutline.test.ts                         │
-  │ ~ Edit     index.vue                                     │
-  │ ~ Bash     pnpm typecheck → exit 0                       │
-  │ ~ Read     Button.vue                                    │
-  │                                       (+18 azioni)       │
-  └──────────────────────────────────────────────────────────┘
+  Progress: [████████████░░░░░░░░] 3/4
+
+  +----------------------------------------------------------+
+  | ⚙️  dev                          (step 3/4)              |
+  |  Feature: button-outline  | Model: sonnet     | 14:22:01 |
+  |  Tools: Read,Write,Edit,Bash,Glob,Grep                   |
+  +----------------------------------------------------------+
+
+  |  Write   ButtonOutline.vue
+  |  Edit    index.vue
+  /  0m45s
 ```
+
+Dopo ogni step: file modificati con diff stat git (`+N -N`) e timestamp:
+
+```
+  +----------------------------------------------------------+
+  |  File modificati                                         |
+  +----------------------------------------------------------+
+  |  components/ButtonOutline.vue      +142    14:22:48      |
+  |  components/index.vue              +3 -1   14:22:49      |
+  +----------------------------------------------------------+
+```
+
+In caso di gate REJECTED: estratto del motivo dal report markdown.
 
 ## Licenza
 

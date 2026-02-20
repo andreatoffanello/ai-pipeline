@@ -230,6 +230,36 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
+# config_step_needs_playwright <step_name>
+# Returns "true" if step has playwright: true, else "false"
+# ---------------------------------------------------------------------------
+config_step_needs_playwright() {
+    local step_name="$1"
+    local val
+    val=$(config_step_get "$step_name" "playwright")
+    if [[ "$val" == "true" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# config_step_allowed_tools <step_name>
+# Returns allowed_tools for step, falling back to defaults.allowed_tools
+# ---------------------------------------------------------------------------
+config_step_allowed_tools() {
+    local step_name="$1"
+    local val
+    val=$(config_step_get "$step_name" "allowed_tools")
+    if [[ -n "$val" ]]; then
+        echo "$val"
+    else
+        config_get_default "defaults.allowed_tools" "Read,Write,Edit,Bash,Glob,Grep"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # config_validate
 # Basic validation: checks required fields exist.
 # ---------------------------------------------------------------------------

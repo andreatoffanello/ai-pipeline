@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib/display.sh — Terminal UI: box ASCII, spinner Braille, semi-log effimeri
+# lib/display.sh — Terminal UI: box ASCII, spinner, semi-log effimeri
 
 # Colori ANSI
 RED='\033[0;31m'
@@ -7,25 +7,70 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
 
 # ---------------------------------------------------------------------------
+# _tool_color <tool_type>  — colore ANSI per tipo di tool
+# ---------------------------------------------------------------------------
+_tool_color() {
+    case "$1" in
+        Read)      printf '%b' "${CYAN}" ;;
+        Write)     printf '%b' "${GREEN}" ;;
+        Edit)      printf '%b' "${YELLOW}" ;;
+        Bash)      printf '%b' "${MAGENTA}" ;;
+        Glob|Grep) printf '%b' "${BLUE}" ;;
+        *)         printf '%b' "${DIM}" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# _display_progress <current> <total>
+# ---------------------------------------------------------------------------
+_display_progress() {
+    local cur="$1" tot="$2"
+    local width=20
+    local filled=$(( cur * width / tot ))
+    local bar="" i
+    for (( i=0; i<filled; i++ )); do bar="${bar}█"; done
+    for (( i=filled; i<width; i++ )); do bar="${bar}░"; done
+    printf "${GREEN}[${BOLD}%s${NC}${GREEN}]${NC} ${BOLD}%d/%d${NC}" "$bar" "$cur" "$tot"
+}
+
+# ---------------------------------------------------------------------------
+# _agent_emoji <step_name>  — emoji per tipo di agente
+# ---------------------------------------------------------------------------
+_agent_emoji() {
+    case "$1" in
+        pm)        printf '🎯' ;;
+        dr-spec)   printf '📐' ;;
+        dev*)      printf '⚙️ ' ;;
+        dr-impl)   printf '🔍' ;;
+        qa*)       printf '✅' ;;
+        *)         printf '▸ ' ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # display_header <pipeline_name> <feature> <steps_string>
-# Stampa il box di intestazione pipeline.
 # ---------------------------------------------------------------------------
 display_header() {
     local name="$1"
     local feature="$2"
     local steps_str="$3"
-    echo -e ""
-    echo -e "${BOLD}  ╔══════════════════════════════════════════════════════════════╗${NC}"
-    printf "${BOLD}  ║  %-61s║${NC}\n" "${name} pipeline"
-    printf "${BOLD}  ║  Feature: %-52s║${NC}\n" "${feature}"
-    printf "${BOLD}  ║  Steps: %-54s║${NC}\n" "${steps_str}"
-    echo -e "${BOLD}  ╚══════════════════════════════════════════════════════════════╝${NC}"
-    echo -e ""
+    local started
+    started=$(date "+%Y-%m-%d %H:%M:%S")
+
+    printf "\n"
+    printf "  ${BOLD}${CYAN}+----------------------------------------------------------+${NC}\n"
+    printf "  ${CYAN}|${NC}  ${BOLD}%-56s${NC}${CYAN}|${NC}\n" "${name} pipeline"
+    printf "  ${CYAN}|${NC}  Feature: ${BOLD}%-50s${CYAN}|${NC}\n" "$feature"
+    printf "  ${CYAN}|${NC}  Steps:   ${DIM}%-50s${NC}${CYAN}|${NC}\n" "$steps_str"
+    printf "  ${CYAN}|${NC}  Started: ${DIM}%-50s${NC}${CYAN}|${NC}\n" "$started"
+    printf "  ${BOLD}${CYAN}+----------------------------------------------------------+${NC}\n"
+    printf "\n"
 }
 
 # ---------------------------------------------------------------------------
@@ -39,80 +84,95 @@ display_step_done() {
 
     local icon color
     case "$step_status" in
-        APPROVED|completato)
-            icon="✓"; color="$GREEN" ;;
-        REJECTED)
-            icon="✗"; color="$RED" ;;
-        *)
-            icon="✓"; color="$GREEN" ;;
+        APPROVED|completato) icon="v"; color="$GREEN" ;;
+        REJECTED)            icon="x"; color="$RED" ;;
+        *)                   icon="v"; color="$GREEN" ;;
     esac
 
-    printf "  ${color}${icon}${NC}  %-14s %-14s %s %s\n" \
-        "$name" "$step_status" "$elapsed" "${DIM}${retry_info}${NC}"
+    printf "  ${color}${BOLD}%s${NC}  Step ${BOLD}%s${NC} completato in ${color}%s${NC}  ${DIM}%s${NC}\n" \
+        "$icon" "$name" "$elapsed" "$retry_info"
 }
 
 # ---------------------------------------------------------------------------
 # display_step_waiting <name>
 # ---------------------------------------------------------------------------
 display_step_waiting() {
-    local name="$1"
-    printf "  ${DIM}○${NC}  %-14s %s\n" "$name" "${DIM}in attesa${NC}"
+    printf "  ${DIM}o  %s${NC}\n" "$1"
 }
 
 # ---------------------------------------------------------------------------
-# Spinner state
+# Stato interno spinner
 # ---------------------------------------------------------------------------
 _SPINNER_PID=""
 _SPINNER_TMPDIR=""
 _SPINNER_LINES_FILE=""
 _SPINNER_ACTION_COUNT=0
 _SPINNER_START_EPOCH=0
-_BOX_LINES=9
+_SPINNER_STEP_NAME=""
 
 # ---------------------------------------------------------------------------
-# display_box_start <step_name> <model>
-# Avvia il box interattivo con spinner e semi-log.
+# display_box_start <step_name> <model> [step_num] [step_total] [tools] [output]
 # ---------------------------------------------------------------------------
 display_box_start() {
     local step_name="$1"
     local model="$2"
+    local step_num="${3:-}"
+    local step_total="${4:-}"
+    local tools="${5:-}"
+    local output="${6:-}"
 
+    _SPINNER_STEP_NAME="$step_name"
     _SPINNER_TMPDIR=$(mktemp -d)
     _SPINNER_LINES_FILE="$_SPINNER_TMPDIR/actions"
     _SPINNER_ACTION_COUNT=0
     _SPINNER_START_EPOCH=$(date +%s)
+    _SPINNER_PID=""
 
-    # Stampa box iniziale (riserva le righe)
-    _display_box_initial "$step_name" "$model"
+    local started_at
+    started_at=$(date "+%H:%M:%S")
 
-    # Avvia refresh loop in background
-    local lines_file="$_SPINNER_LINES_FILE"
+    # Progress bar
+    if [[ -n "$step_num" && -n "$step_total" ]]; then
+        printf "\n  Progress: "
+        _display_progress "$step_num" "$step_total"
+        printf "\n"
+    fi
+
+    # Box step
+    local emoji
+    emoji=$(_agent_emoji "$step_name")
+    printf "\n"
+    printf "  ${BOLD}${CYAN}+----------------------------------------------------------+${NC}\n"
+    if [[ -n "$step_num" ]]; then
+        printf "  ${CYAN}|${NC}  %s ${BOLD}%-28s${NC}  ${DIM}(step %s/%s)${NC}%*s${CYAN}|${NC}\n" \
+            "$emoji" "$step_name" "$step_num" "$step_total" \
+            $(( 14 - ${#step_num} - ${#step_total} )) ""
+    else
+        printf "  ${CYAN}|${NC}  %s ${BOLD}%-53s${NC}${CYAN}|${NC}\n" "$emoji" "$step_name"
+    fi
+    printf "  ${CYAN}|${NC}  ${DIM}Feature: %-14s | Model: ${CYAN}%-10s${DIM} | %s${NC}%*s${CYAN}|${NC}\n" \
+        "${PIPELINE_FEATURE:-?}" "$model" "$started_at" 2 ""
+    [[ -n "$output" ]] && \
+    printf "  ${CYAN}|${NC}  ${DIM}Output atteso: %-43s${NC}${CYAN}|${NC}\n" "$output"
+    [[ -n "$tools" ]] && \
+    printf "  ${CYAN}|${NC}  ${DIM}Tools: %-51s${NC}${CYAN}|${NC}\n" "$tools"
+    printf "  ${BOLD}${CYAN}+----------------------------------------------------------+${NC}\n"
+    printf "\n"
+
+    # Timer live su /dev/tty con \r
     local start_epoch="$_SPINNER_START_EPOCH"
-    local box_lines="$_BOX_LINES"
-
     (
-        local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+        set +euo pipefail 2>/dev/null || true
+        local spin='|/-\'
         local i=0
-
         while true; do
-            local c="${spin_chars:$(( i % ${#spin_chars} )):1}"
-            local now elapsed mins secs elapsed_str
+            local now elapsed mins secs
             now=$(date +%s)
             elapsed=$(( now - start_epoch ))
             mins=$(( elapsed / 60 ))
             secs=$(( elapsed % 60 ))
-            elapsed_str=$(printf "%dm%02ds" "$mins" "$secs")
-
-            local actions="" total=0
-            if [[ -f "$lines_file" ]]; then
-                actions=$(tail -5 "$lines_file" 2>/dev/null || true)
-                total=$(wc -l < "$lines_file" 2>/dev/null | tr -d ' ' || echo 0)
-            fi
-
-            # Torna su di box_lines righe e ridisegna
-            printf "\033[%dA\033[J" "$box_lines"
-            _display_box_render "$step_name" "$model" "$elapsed_str" "$c" "$actions" "$total"
-
+            local c="${spin:$(( i % 4 )):1}"
+            printf "\r  ${DIM}%s  %dm%02ds${NC}  " "$c" "$mins" "$secs" > /dev/tty
             i=$(( i + 1 ))
             sleep 0.15
         done
@@ -120,95 +180,8 @@ display_box_start() {
     _SPINNER_PID=$!
 }
 
-# Stampa box iniziale statico (9 righe)
-_display_box_initial() {
-    local step_name="$1"
-    local model="$2"
-    local cols
-    cols=$(tput cols 2>/dev/null || echo 80)
-    local inner=$(( cols - 4 ))
-
-    printf "  ${CYAN}┌─ %-*s─┐${NC}\n" $(( inner - 1 )) "${step_name} (${model}) "
-    printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" "⠋ Lavorando..."
-    printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" ""
-    printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" ""
-    printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" ""
-    printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" ""
-    printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" ""
-    printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" ""
-    local bar
-    bar=$(printf '─%.0s' $(seq 1 $(( inner + 2 ))))
-    printf "  ${CYAN}└%s┘${NC}\n" "$bar"
-}
-
-# Render completo con contenuto dinamico (9 righe)
-_display_box_render() {
-    local step_name="$1"
-    local model="$2"
-    local elapsed="$3"
-    local spinner_char="$4"
-    local actions="$5"
-    local total_actions="$6"
-
-    local cols
-    cols=$(tput cols 2>/dev/null || echo 80)
-    local inner=$(( cols - 4 ))
-
-    # Header con elapsed a destra
-    local header_left="${step_name} (${model})"
-    local header_right="${elapsed}"
-    local dash_space=$(( inner - ${#header_left} - ${#header_right} - 4 ))
-    [[ $dash_space -lt 1 ]] && dash_space=1
-    local dashes
-    dashes=$(printf '─%.0s' $(seq 1 $dash_space))
-
-    printf "  ${CYAN}┌─ %s %s %s ─┐${NC}\n" \
-        "$header_left" "$dashes" "$header_right"
-
-    # Spinner line
-    printf "  ${CYAN}│${NC} ${CYAN}%s${NC} %-*s ${CYAN}│${NC}\n" \
-        "$spinner_char" $(( inner - 2 )) "Lavorando..."
-
-    # Empty separator
-    printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" ""
-
-    # 5 action lines
-    local action_lines=()
-    if [[ -n "$actions" ]]; then
-        while IFS= read -r line; do
-            action_lines+=("$line")
-        done <<< "$actions"
-    fi
-
-    local extra=$(( total_actions > 5 ? total_actions - 5 : 0 ))
-
-    for i in 0 1 2 3 4; do
-        local line="${action_lines[$i]:-}"
-        line="${line:0:$inner}"
-        if [[ -n "$line" ]]; then
-            printf "  ${CYAN}│${NC} ${DIM}~ %-*s${NC} ${CYAN}│${NC}\n" $(( inner - 2 )) "$line"
-        else
-            printf "  ${CYAN}│${NC} %-*s ${CYAN}│${NC}\n" "$inner" ""
-        fi
-    done
-
-    # Footer con counter azioni extra
-    local footer=""
-    if [[ $extra -gt 0 ]]; then
-        footer="(+${extra} azioni)"
-    fi
-    printf "  ${CYAN}│${NC} %*s${DIM}%s${NC}  ${CYAN}│${NC}\n" \
-        $(( inner - ${#footer} )) "" "$footer"
-
-    # Bottom border
-    local bar
-    bar=$(printf '─%.0s' $(seq 1 $(( inner + 2 ))))
-    printf "  ${CYAN}└%s┘${NC}\n" "$bar"
-}
-
 # ---------------------------------------------------------------------------
 # display_box_add_action <tool_type> <argument>
-# Aggiunge un'azione al semi-log del box attivo.
 # ---------------------------------------------------------------------------
 display_box_add_action() {
     local tool="$1"
@@ -216,12 +189,14 @@ display_box_add_action() {
     if [[ -n "$_SPINNER_LINES_FILE" ]]; then
         printf "%-8s %s\n" "$tool" "$arg" >> "$_SPINNER_LINES_FILE"
         _SPINNER_ACTION_COUNT=$(( _SPINNER_ACTION_COUNT + 1 ))
+        local col
+        col=$(_tool_color "$tool")
+        printf "\r  %b%-8s${NC}  %s\n" "$col" "$tool" "$arg" > /dev/tty
     fi
 }
 
 # ---------------------------------------------------------------------------
 # display_box_stop
-# Ferma lo spinner e cancella il box.
 # ---------------------------------------------------------------------------
 display_box_stop() {
     if [[ -n "$_SPINNER_PID" ]] && kill -0 "$_SPINNER_PID" 2>/dev/null; then
@@ -230,14 +205,149 @@ display_box_stop() {
     fi
     _SPINNER_PID=""
 
-    # Cancella il box
-    printf "\033[%dA\033[J" "$_BOX_LINES"
+    if [[ "$_SPINNER_START_EPOCH" -gt 0 ]]; then
+        local now elapsed mins secs
+        now=$(date +%s)
+        elapsed=$(( now - _SPINNER_START_EPOCH ))
+        mins=$(( elapsed / 60 ))
+        secs=$(( elapsed % 60 ))
+        printf "\r  ${GREEN}v${NC}  Step ${BOLD}%s${NC} completato in ${GREEN}%dm%02ds${NC}  ${DIM}(%d azioni)${NC}\n" \
+            "$_SPINNER_STEP_NAME" "$mins" "$secs" "$_SPINNER_ACTION_COUNT" > /dev/tty
+    fi
 
     if [[ -n "$_SPINNER_TMPDIR" ]]; then
         rm -rf "$_SPINNER_TMPDIR"
         _SPINNER_TMPDIR=""
         _SPINNER_LINES_FILE=""
     fi
+}
+
+# ---------------------------------------------------------------------------
+# display_file_changes <file1> [file2 ...]
+# Mostra i file modificati/creati con diff stat git e timestamp.
+# ---------------------------------------------------------------------------
+display_file_changes() {
+    local files=("$@")
+    [[ ${#files[@]} -eq 0 ]] && return 0
+
+    local has_files=false
+    for f in "${files[@]}"; do
+        [[ -f "$f" ]] && has_files=true && break
+    done
+    [[ "$has_files" == "false" ]] && return 0
+
+    printf "\n"
+    printf "  ${DIM}+----------------------------------------------------------+${NC}\n"
+    printf "  ${DIM}|  File modificati                                         |${NC}\n"
+    printf "  ${DIM}+----------------------------------------------------------+${NC}\n"
+
+    for f in "${files[@]}"; do
+        [[ ! -f "$f" ]] && continue
+
+        local mtime
+        mtime=$(date -r "$f" "+%H:%M:%S" 2>/dev/null || stat -c "%y" "$f" 2>/dev/null | cut -c12-19)
+
+        local added=0 removed=0
+        if git -C "$(dirname "$f")" rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
+            local diff_stat
+            diff_stat=$(git -C "$(dirname "$f")" diff --numstat HEAD -- "$f" 2>/dev/null || true)
+            if [[ -n "$diff_stat" ]]; then
+                added=$(echo "$diff_stat" | awk '{print $1}')
+                removed=$(echo "$diff_stat" | awk '{print $2}')
+            else
+                added=$(wc -l < "$f" 2>/dev/null | tr -d ' ' || echo 0)
+                removed=0
+            fi
+        else
+            added=$(wc -l < "$f" 2>/dev/null | tr -d ' ' || echo 0)
+            removed=0
+        fi
+
+        local relpath="${f/#$PWD\//}"
+        local display_path="$relpath"
+        [[ ${#display_path} -gt 38 ]] && display_path="...${relpath: -35}"
+
+        local stat_str=""
+        [[ $added -gt 0 ]]   && stat_str="${stat_str}${GREEN}+${added}${NC}"
+        [[ $added -gt 0 && $removed -gt 0 ]] && stat_str="${stat_str} "
+        [[ $removed -gt 0 ]] && stat_str="${stat_str}${RED}-${removed}${NC}"
+        [[ -z "$stat_str" ]]  && stat_str="${DIM}~${NC}"
+
+        printf "  ${DIM}|${NC}  %-38s  %b  ${DIM}%s${NC}\n" \
+            "$display_path" "$stat_str" "$mtime"
+    done
+
+    printf "  ${DIM}+----------------------------------------------------------+${NC}\n"
+    printf "\n"
+}
+
+# ---------------------------------------------------------------------------
+# display_rejected_summary <report_file>
+# Estrae e mostra il motivo di REJECTED dal file .md del report.
+# ---------------------------------------------------------------------------
+display_rejected_summary() {
+    local report_file="$1"
+    [[ ! -f "$report_file" ]] && return 0
+
+    local summary
+    summary=$(python3 - "$report_file" <<'PYEOF'
+import sys, re
+
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        lines = f.readlines()
+except:
+    sys.exit(0)
+
+keywords = re.compile(r'(motiv|reject|problem|issue|critic|mancant|errat|non conform|da corregger|fallito|fail|bloccat)', re.I)
+section_header = re.compile(r'^#{1,3}\s+')
+
+output = []
+in_section = False
+for line in lines:
+    stripped = line.rstrip()
+    if not stripped:
+        continue
+    if section_header.match(stripped) and keywords.search(stripped):
+        in_section = True
+        output.append(stripped)
+        continue
+    if section_header.match(stripped) and in_section:
+        break
+    if in_section:
+        output.append(stripped)
+        if len(output) >= 12:
+            break
+
+if not output:
+    count = 0
+    for line in lines:
+        stripped = line.rstrip()
+        if stripped:
+            output.append(stripped)
+            count += 1
+            if count >= 6:
+                break
+
+print('\n'.join(output[:12]))
+PYEOF
+)
+
+    [[ -z "$summary" ]] && return 0
+
+    printf "\n"
+    printf "  ${RED}+----------------------------------------------------------+${NC}\n"
+    printf "  ${RED}|  Motivo rejection                                        |${NC}\n"
+    printf "  ${RED}+----------------------------------------------------------+${NC}\n"
+    while IFS= read -r line; do
+        line="${line#\#\#\# }"
+        line="${line#\#\# }"
+        line="${line#\# }"
+        printf "  ${RED}|${NC}  ${DIM}%-56s${NC}${RED}|${NC}\n" "${line:0:56}"
+    done <<< "$summary"
+    printf "  ${RED}+----------------------------------------------------------+${NC}\n"
+    printf "\n"
 }
 
 # ---------------------------------------------------------------------------
@@ -250,17 +360,16 @@ display_gate_result() {
     local info="${4:-}"
 
     if [[ "$result" == "APPROVED" ]]; then
-        printf "  ${GREEN}✓${NC}  %-14s ${GREEN}APPROVED${NC}      %s %s\n" \
-            "$step_name" "$elapsed" "${DIM}${info}${NC}"
+        printf "\n  ${GREEN}v${NC}  Verdetto: ${BOLD}${GREEN}%s -- APPROVATO${NC}  ${DIM}%s${NC}\n" \
+            "$step_name" "$elapsed"
     else
-        printf "  ${RED}✗${NC}  %-14s ${RED}REJECTED${NC}      %s   ${DIM}→ %s${NC}\n" \
+        printf "\n  ${RED}x${NC}  Verdetto: ${BOLD}${RED}%s -- RESPINTO${NC}  ${DIM}%s  %s${NC}\n" \
             "$step_name" "$elapsed" "$info"
     fi
 }
 
 # ---------------------------------------------------------------------------
 # display_success <feature> <elapsed> [output_file...]
-# Box finale di completamento.
 # ---------------------------------------------------------------------------
 display_success() {
     local feature="$1"
@@ -268,31 +377,32 @@ display_success() {
     shift 2
     local files=("$@")
 
-    echo -e ""
-    echo -e "${BOLD}${GREEN}  ╔══════════════════════════════════════════════════════════════╗${NC}"
-    printf "${BOLD}${GREEN}  ║  ✓ Pipeline completata — %-37s║${NC}\n" "${elapsed}"
-    printf "${BOLD}${GREEN}  ║  Feature: %-52s║${NC}\n" "${feature}"
-    echo -e "${BOLD}${GREEN}  ║                                                              ║${NC}"
+    printf "\n"
+    printf "  ${BOLD}${GREEN}+----------------------------------------------------------+${NC}\n"
+    printf "  ${GREEN}|${NC}  ${BOLD}${GREEN}Pipeline completata${NC}  ${DIM}%s${NC}%*s${GREEN}|${NC}\n" \
+        "$elapsed" $(( 27 - ${#elapsed} )) ""
+    printf "  ${GREEN}|${NC}  Feature: ${BOLD}%-50s${GREEN}|${NC}\n" "$feature"
+    printf "  ${GREEN}|${NC}%*s${GREEN}|${NC}\n" 58 ""
     for f in "${files[@]}"; do
-        printf "${BOLD}${GREEN}  ║  %-61s║${NC}\n" "$f"
+        printf "  ${GREEN}|${NC}  ${DIM}%-56s${NC}${GREEN}|${NC}\n" "$f"
     done
-    echo -e "${BOLD}${GREEN}  ╚══════════════════════════════════════════════════════════════╝${NC}"
-    echo -e ""
+    printf "  ${BOLD}${GREEN}+----------------------------------------------------------+${NC}\n"
+    printf "\n"
 }
 
 # ---------------------------------------------------------------------------
 # display_error / display_warn / display_info
 # ---------------------------------------------------------------------------
 display_error() {
-    echo -e "  ${RED}✗  $1${NC}" >&2
+    printf "\n  ${RED}ERR  %s${NC}\n" "$1" >&2
 }
 
 display_warn() {
-    echo -e "  ${YELLOW}⚠  $1${NC}"
+    printf "  ${YELLOW}WARN  %s${NC}\n" "$1"
 }
 
 display_info() {
-    echo -e "  ${DIM}▸  $1${NC}"
+    printf "  ${DIM}>>  %s${NC}\n" "$1"
 }
 
 # ---------------------------------------------------------------------------

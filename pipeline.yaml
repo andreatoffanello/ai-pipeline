@@ -5,6 +5,11 @@
 pipeline:
   name: my-project
 
+# project: (opzionale) usato da playwright e da prompt_build
+# project:
+#   name: my-project
+#   dev_port: 3000
+
 defaults:
   provider: anthropic
   model: claude-sonnet-4-6
@@ -12,21 +17,25 @@ defaults:
   allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
   token_max_retries: 5
   token_base_delay: 60
+  token_backoff_multiplier: 2
 
 steps:
   - name: pm
     description: "Product Manager — scrive la specifica"
     prompt: prompts/pm.md
+    prompt_section: "PM (Product Manager)"
     provider: anthropic
     model: claude-opus-4-6
     allowed_tools: "Read,Write,Edit,Glob,Grep"
     mcp_servers: []
     output: specs/${FEATURE}.md
     verdict: false
+    playwright: false
 
   - name: dr-spec
     description: "Design Reviewer — valida la specifica"
     prompt: prompts/dr-spec.md
+    prompt_section: "DR-SPEC (Design Reviewer)"
     provider: anthropic
     model: claude-sonnet-4-6
     allowed_tools: "Read,Write,Edit,Glob,Grep"
@@ -34,20 +43,25 @@ steps:
     output: reviews/${FEATURE}-spec.md
     verdict: true
     on_reject: pm
+    retry_step: pm
+    playwright: false
 
   - name: dev
     description: "Developer — implementa"
     prompt: prompts/dev.md
+    prompt_section: "DEV (Developer)"
     provider: anthropic
     model: claude-sonnet-4-6
     allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
     mcp_servers: []
     output: ""
     verdict: false
+    playwright: false
 
   - name: qa
     description: "QA — verifica i criteri di accettazione"
     prompt: prompts/qa.md
+    prompt_section: "QA (Quality Assurance)"
     provider: anthropic
     model: claude-sonnet-4-6
     allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
@@ -56,6 +70,8 @@ steps:
     output: qa/${FEATURE}-qa.md
     verdict: true
     on_reject: dev
+    retry_step: dev
+    playwright: true
 
 providers:
   anthropic:
