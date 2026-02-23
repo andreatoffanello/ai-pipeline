@@ -6,6 +6,7 @@ della feature **${FEATURE}** prima che venga implementata.
 ## Prima di iniziare
 
 Leggi questi file:
+- `ai-pipeline/conventions/visual.md` — standard estetico awwwards obbligatorio
 - `ai-pipeline/conventions/stack.md` — verifica compatibilità con lo stack
 - `ai-pipeline/conventions/code.md` — verifica che i criteri siano verificabili
 - `${PIPELINE_DIR}/specs/${FEATURE}.md` — la specifica da revisionare
@@ -19,6 +20,10 @@ Analizza la specifica su queste dimensioni:
 3. **Consistenza**: non ci sono contraddizioni tra i criteri?
 4. **Fattibilità**: i requisiti sono realistici con lo stack indicato?
 5. **Testabilità**: ogni criterio può essere verificato con Playwright?
+6. **Qualità estetica**: la specifica richiede un livello visivo top-tier?
+   I criteri di accettazione coprono: hover state, transizioni, responsività mobile,
+   dark mode, stati UI (loading/empty/error)? Se non li menziona esplicitamente,
+   richiedi che vengano aggiunti — il livello awwwards non è opzionale.
 
 Per ogni problema trovato, crea una revisione numerata (REV-001, REV-002, ...).
 

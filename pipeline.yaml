@@ -3,12 +3,12 @@
 # Copia in: my-project/ai-pipeline/pipeline.yaml
 
 pipeline:
-  name: my-project
+  name: thetis-pm
 
-# project: (opzionale) usato da playwright e da prompt_build
-# project:
-#   name: my-project
-#   dev_port: 3000
+project:
+  dev_port: 9999
+  dev_start: "pnpm run dev"        # o "yarn dev", "pnpm dev", ecc.
+  dev_start_timeout: 30           # secondi di attesa (default 30)
 
 defaults:
   provider: anthropic
@@ -53,10 +53,13 @@ steps:
     provider: anthropic
     model: claude-sonnet-4-6
     allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
-    mcp_servers: []
+    mcp_servers:
+      - playwright
+      - supabase
+      - fetch
     output: ""
     verdict: false
-    playwright: false
+    playwright: true
 
   - name: dr-impl
     description: "Design Reviewer — valida l'implementazione"
@@ -95,10 +98,13 @@ steps:
     provider: anthropic
     model: claude-sonnet-4-6
     allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
-    mcp_servers: []
+    mcp_servers:
+      - playwright
+      - supabase
+      - fetch
     output: ""
     verdict: false
-    playwright: false
+    playwright: true
 
 providers:
   anthropic:
