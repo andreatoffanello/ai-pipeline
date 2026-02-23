@@ -20,9 +20,9 @@ l'UI può essere rotta — solo i test visivi lo rivelano.
 
 ## Istruzioni
 
-1. La URL del dev server è indicata nelle istruzioni iniziali della pipeline —
-   usa quella base. La pagina di test della feature si trova al percorso
-   `/__test__/${FEATURE}` (es. `http://localhost:PORT/__test__/${FEATURE}`)
+1. La URL del dev server è indicata nelle istruzioni iniziali della pipeline.
+   Naviga alle **route reali della feature** come indicate nella specifica
+   (`${PIPELINE_DIR}/specs/${FEATURE}.md`) — non esistono pagine di test separate.
 2. Per ogni criterio di accettazione in `${PIPELINE_DIR}/specs/${FEATURE}.md`:
    - Naviga alla pagina/sezione corrispondente
    - **Interagisci** come farebbe un utente reale: click, hover, scroll, input

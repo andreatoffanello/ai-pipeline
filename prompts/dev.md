@@ -19,12 +19,12 @@ Leggi questi file nell'ordine indicato. Non saltarne nessuno.
 1. **Esplora** il codebase per capire struttura e convenzioni esistenti (`Glob`, `Read`)
 2. **Pianifica** mentalmente i file da creare/modificare
 3. **Implementa** seguendo ESATTAMENTE le conventions e skills lette
-4. **Crea la pagina di test** in `app/pages/__test__/${FEATURE}.vue` con `data-testid`
-   su ogni elemento interattivo — il QA Playwright la usa per i test visivi
-5. **Verifica visivamente** con Playwright: naviga la pagina di test con `browser_navigate`,
-   fai `browser_snapshot` per leggere la struttura, `browser_take_screenshot` per
-   vedere il risultato visivo reale. Se trovi problemi estetici, correggili prima
-   di dichiarare l'implementazione completa.
+4. **Aggiungi `data-testid`** agli elementi interattivi principali direttamente
+   nelle pagine reali della feature — il QA li usa per interagire con precisione
+5. **Verifica visivamente** con Playwright: naviga la route reale della feature
+   con `browser_navigate`, fai `browser_snapshot` per leggere la struttura,
+   `browser_take_screenshot` per vedere il risultato visivo reale. Se trovi
+   problemi estetici, correggili prima di dichiarare l'implementazione completa.
 
 ## Vincoli non negoziabili
 

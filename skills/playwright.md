@@ -90,7 +90,7 @@ Per ogni test in `${PIPELINE_DIR}/qa/${FEATURE}-qa.md`:
 ### AC-001: [Titolo criterio dalla specifica]
 
 **Risultato:** PASS / FAIL
-**URL testata:** http://localhost:PORT/__test__/${FEATURE}
+**URL testata:** [route reale della feature, es. http://localhost:PORT/feature/lista]
 **Azioni eseguite:** [es. "scroll down, hover su btn-submit, click"]
 **Viewport:** 1440×900 (desktop) / 375×812 (mobile)
 **Qualità visiva:** PASS — spaziatura consistente, hover fluido, transizioni ok

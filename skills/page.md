@@ -180,106 +180,23 @@ onMounted(() => {
 - [ ] Responsive (max-width + padding)
 - [ ] Dark mode automatica (se usi design tokens)
 
-## Pagina di test Playwright (obbligatoria)
+## data-testid sulle pagine reali
 
-Per ogni feature implementata, crea una pagina di test in `pages/__test__/`:
+Aggiungi `data-testid` direttamente sugli elementi interattivi delle pagine reali
+della feature — il QA li usa per interagire con precisione tramite Playwright.
 
 ```vue
-<!--
-  Pagina Test: nome-feature
-
-  Pagina di test per Playwright. Mostra tutte le varianti/stati
-  del componente/feature con elementi data-testid per l'automazione.
--->
-<script setup>
-definePageMeta({ layout: false }) // nessun layout per isolare il componente
-
-// Stato interattivo per simulare scenari di test
-const counter = ref(0)
-const isLoading = ref(false)
-const hasError = ref(false)
-const isEmpty = ref(false)
-
-/** Simula loading state per 2 secondi */
-const simulateLoading = async () => {
-    isLoading.value = true
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    isLoading.value = false
-}
-</script>
-
-<template>
-    <div class="test-page" data-testid="test-nome-feature">
-
-        <section class="test-section" data-testid="section-default">
-            <h2>Stato default</h2>
-            <!-- Componente nello stato normale -->
-            <NomeComponente data-testid="component-default" />
-        </section>
-
-        <section class="test-section" data-testid="section-interactive">
-            <h2>Interazione</h2>
-            <button data-testid="btn-action" @click="counter++">
-                Azione ({{ counter }})
-            </button>
-            <span data-testid="result-counter">{{ counter }}</span>
-        </section>
-
-        <section class="test-section" data-testid="section-states">
-            <h2>Stati</h2>
-            <button data-testid="btn-loading" @click="simulateLoading">
-                Simula loading
-            </button>
-            <button data-testid="btn-error" @click="hasError = !hasError">
-                Toggle error
-            </button>
-            <button data-testid="btn-empty" @click="isEmpty = !isEmpty">
-                Toggle empty
-            </button>
-
-            <NomeComponente
-                :loading="isLoading"
-                :error="hasError ? 'Errore simulato' : null"
-                :empty="isEmpty"
-                data-testid="component-states"
-            />
-        </section>
-
-    </div>
-</template>
-
-<style lang="scss" scoped>
-.test-page {
-    padding: var(--space-xl);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2xl);
-}
-
-.test-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-lg);
-    border: 0.1rem dashed var(--color-border);
-    border-radius: var(--radius-md);
-
-    h2 {
-        font-size: var(--text-sm);
-        color: var(--color-text-light);
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-    }
-}
-</style>
+<!-- Esempi di data-testid sulle pagine reali -->
+<button data-testid="btn-submit" @click="onSubmit">{{ $t('action.save') }}</button>
+<input data-testid="input-name" v-model="name" />
+<div data-testid="state-empty" v-if="isEmpty">...</div>
+<div data-testid="state-loading" v-if="isLoading">...</div>
+<div data-testid="content-list" v-else>...</div>
 ```
 
-### Regole pagina test
+### Regole data-testid
 
-- `layout: false` per isolare il componente da header/sidebar
-- `data-testid` su ogni elemento interattivo e su ogni stato
-- Mostra tutte le varianti del componente nella stessa pagina
-- Includi controlli per simulare ogni stato (loading, error, empty)
-- Stato visibile (counter, testo che cambia) per verificare interazioni
-- Path: `pages/__test__/nome-feature.vue`
-- Accessibile su: `http://localhost:3000/__test__/nome-feature`
+- Aggiungi `data-testid` su tutti gli elementi interattivi: bottoni, input, link, dropdown
+- Aggiungi `data-testid` sui contenitori di stato: loading, empty, error, populated
+- Usa nomi descrittivi con prefisso: `btn-*`, `input-*`, `state-*`, `content-*`
+- Mai su elementi puramente decorativi

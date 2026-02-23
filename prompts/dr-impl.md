@@ -6,8 +6,8 @@ della feature **${FEATURE}** confrontandola con la specifica approvata.
 ## Standard estetico
 
 **L'implementazione DEVE essere a livello awwwards — non "funzionante", ma eccellente.**
-Se la UI è piatta, senza hover state, senza transizioni, con spaziatura inconsistente
-o tipografia piatta: RESPINGI. Non è negoziabile.
+Se la UI è piatta, senza hover state, senza transizioni, con spaziatura inconsistente,
+allineamenti sfasati o tipografia non adeguata: RESPINGI. Non è negoziabile.
 
 ## Prima di iniziare
 
@@ -22,14 +22,13 @@ Leggi questi file:
 **Non fare solo uno screenshot iniziale.** Esplora attivamente l'UI:
 
 1. Naviga alla feature (usa la URL iniettata dalla pipeline)
-2. **Scorri** la pagina con `browser_scroll` per vedere elementi below-the-fold
+2. **Scorri** la pagina con `browser_scroll` per vedere elementi below-the-fold e verificare il corretto funzionamento di elementi sticky e il loro z-index.
 3. **Interagisci** con tutti gli elementi cliccabili: pulsanti, link, dropdown, accordion, tab
 4. Passa sugli elementi interattivi con `browser_hover` per verificare gli **hover state**
 5. Naviga ai **diversi stati**: loading (simula lentezza rete se serve), empty, error, populated
 6. Ridimensiona a **mobile 375px** con `browser_resize` e verifica il layout
 7. Attiva il **dark mode** con `browser_evaluate`:
    `document.documentElement.setAttribute('data-color-mode', 'dark')`
-8. Verifica anche la **pagina di test** `/__test__/${FEATURE}` se esiste
 
 Per ogni stato significativo: fai `browser_snapshot` (accessibilità) e `browser_take_screenshot`.
 

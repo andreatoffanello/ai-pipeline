@@ -19,9 +19,9 @@ l'UI può essere rotta — solo i test visivi lo rivelano.
 
 ## Istruzioni
 
-1. Verifica che il dev server sia attivo (porta 3000)
-2. Naviga a `http://localhost:3000/__test__/${FEATURE}` — la pagina di test creata dal dev
-3. Per ogni criterio di accettazione in `specs/${FEATURE}.md`:
+1. La URL del dev server è indicata nelle istruzioni iniziali della pipeline.
+   Naviga alle **route reali della feature** come indicate nella specifica (`specs/${FEATURE}.md`)
+2. Per ogni criterio di accettazione in `specs/${FEATURE}.md`:
    - Interagisci con l'UI come farebbe un utente reale
    - Fai uno screenshot
    - Verifica la qualità visiva con la checklist di `ai-pipeline/skills/playwright.md`

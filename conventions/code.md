@@ -81,8 +81,6 @@ pages/
     index.vue         ← lista
     [id].vue          ← dettaglio
     new.vue           ← creazione
-  __test__/
-    feature.vue       ← pagina test Playwright
 ```
 
 ## Anti-pattern da evitare
