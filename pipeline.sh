@@ -223,7 +223,7 @@ _run_pipeline() {
         while true; do
             # Costruisci prompt
             local final_prompt
-            final_prompt=$(mktemp /tmp/pipeline-prompt.XXXXXX.md)
+            final_prompt=$(mktemp /tmp/pipeline-prompt-XXXXXX)
 
             local extra_ctx=""
             if [[ $retries -gt 0 ]] && [[ -n "$on_reject" ]] && [[ -n "$output" ]]; then
@@ -334,7 +334,7 @@ _run_pipeline() {
                         [[ -f "${PIPELINE_DIR}/${output}" ]] && feedback=$(cat "${PIPELINE_DIR}/${output}")
 
                         local reject_prompt
-                        reject_prompt=$(mktemp /tmp/pipeline-reject.XXXXXX.md)
+                        reject_prompt=$(mktemp /tmp/pipeline-reject-XXXXXX)
                         prompt_build "$on_reject" "$PIPELINE_FEATURE" "$feedback" > "$reject_prompt" || true
 
                         playwright_check_step "$on_reject" "$PIPELINE_FEATURE" "$reject_prompt"

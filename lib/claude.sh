@@ -79,7 +79,7 @@ claude_run() {
         local filtered_mcp
         filtered_mcp=$(_claude_filter_mcp "$mcp_servers")
         if [[ -n "$filtered_mcp" ]]; then
-            tmp_mcp=$(mktemp /tmp/pipeline-mcp.XXXXXX.json)
+            tmp_mcp=$(mktemp /tmp/pipeline-mcp-XXXXXX)
             echo "$filtered_mcp" > "$tmp_mcp"
             mcp_flag="--mcp-config ${tmp_mcp}"
         fi
