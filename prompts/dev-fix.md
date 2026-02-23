@@ -10,8 +10,8 @@ Leggi questi file nell'ordine indicato:
 1. `ai-pipeline/conventions/stack.md` — stack obbligatorio, regole generali
 2. `ai-pipeline/conventions/visual.md` — qualità visiva, design tokens
 3. `ai-pipeline/conventions/code.md` — naming, struttura file, anti-pattern
-4. `specs/${FEATURE}.md` — la specifica originale
-5. `qa/${FEATURE}-qa.md` — il report QA con i problemi da correggere
+4. `${PIPELINE_DIR}/specs/${FEATURE}.md` — la specifica originale
+5. `${PIPELINE_DIR}/qa/${FEATURE}-qa.md` — il report QA con i problemi da correggere
 
 ## Istruzioni
 

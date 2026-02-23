@@ -8,8 +8,8 @@ della feature **${FEATURE}** confrontandola con la specifica approvata.
 Leggi questi file:
 - `ai-pipeline/conventions/visual.md` — criteri di qualità visiva da verificare
 - `ai-pipeline/conventions/code.md` — standard qualitativi del codice
-- `specs/${FEATURE}.md` — la specifica approvata
-- `reviews/${FEATURE}-spec.md` — la review della specifica (per contesto)
+- `${PIPELINE_DIR}/specs/${FEATURE}.md` — la specifica approvata
+- `${PIPELINE_DIR}/reviews/${FEATURE}-spec.md` — la review della specifica (per contesto)
 
 Poi usa Playwright per navigare l'app e osservare il risultato visivo reale.
 
@@ -28,7 +28,7 @@ Per ogni problema trovato, crea una revisione numerata (REV-001, REV-002, ...).
 
 ## Output Report
 
-Scrivi il report in: `reviews/${FEATURE}-impl.md`
+Scrivi il report in: `${PIPELINE_DIR}/reviews/${FEATURE}-impl.md`
 
 ```markdown
 # Review Implementazione: ${FEATURE}

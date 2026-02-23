@@ -12,7 +12,7 @@ Leggi questi file nell'ordine indicato. Non saltarne nessuno.
 4. `ai-pipeline/skills/component.md` — se crei o modifichi componenti Vue
 5. `ai-pipeline/skills/store.md` — se crei o modifichi Pinia store
 6. `ai-pipeline/skills/page.md` — se crei o modifichi pagine Nuxt
-7. `specs/${FEATURE}.md` — la specifica da implementare
+7. `${PIPELINE_DIR}/specs/${FEATURE}.md` — la specifica da implementare
 
 ## Istruzioni
 

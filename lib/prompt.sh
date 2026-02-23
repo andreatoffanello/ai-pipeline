@@ -118,6 +118,7 @@ prompt_build() {
         content=$(cat "$static_prompt")
         content="${content//\[FEATURE_NAME\]/$feature}"
         content="${content//\$\{FEATURE\}/$feature}"
+        content="${content//\$\{PIPELINE_DIR\}/$PIPELINE_DIR}"
 
         # Inietta brief per step pm
         if [[ "$step" == "pm" ]]; then
@@ -153,9 +154,10 @@ prompt_build() {
         return 1
     fi
 
-    # Sostituisci [FEATURE_NAME] e ${FEATURE}
+    # Sostituisci [FEATURE_NAME], ${FEATURE} e ${PIPELINE_DIR}
     base_prompt="${base_prompt//\[FEATURE_NAME\]/$feature}"
     base_prompt="${base_prompt//\$\{FEATURE\}/$feature}"
+    base_prompt="${base_prompt//\$\{PIPELINE_DIR\}/$PIPELINE_DIR}"
 
     # Blocco contesto globale
     local pipeline_name

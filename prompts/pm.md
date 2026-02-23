@@ -22,7 +22,7 @@ Leggi questi file di contesto del progetto:
 
 ## Output
 
-Scrivi la specifica in: `specs/${FEATURE}.md`
+Scrivi la specifica in: `${PIPELINE_DIR}/specs/${FEATURE}.md`
 
 ## Formato output
 

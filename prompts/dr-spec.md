@@ -8,7 +8,7 @@ della feature **${FEATURE}** prima che venga implementata.
 Leggi questi file:
 - `ai-pipeline/conventions/stack.md` — verifica compatibilità con lo stack
 - `ai-pipeline/conventions/code.md` — verifica che i criteri siano verificabili
-- `specs/${FEATURE}.md` — la specifica da revisionare
+- `${PIPELINE_DIR}/specs/${FEATURE}.md` — la specifica da revisionare
 
 ## Cosa valutare
 
@@ -24,7 +24,7 @@ Per ogni problema trovato, crea una revisione numerata (REV-001, REV-002, ...).
 
 ## Output Report
 
-Scrivi il report in: `reviews/${FEATURE}-spec.md`
+Scrivi il report in: `${PIPELINE_DIR}/reviews/${FEATURE}-spec.md`
 
 ```markdown
 # Review Specifica: ${FEATURE}

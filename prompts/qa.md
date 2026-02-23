@@ -9,7 +9,7 @@ Leggi questi file nell'ordine indicato:
 
 1. `ai-pipeline/skills/playwright.md` — come strutturare ed eseguire test visivi
 2. `ai-pipeline/conventions/visual.md` — criteri qualità visiva awwwards da verificare
-3. `specs/${FEATURE}.md` — criteri di accettazione da testare
+3. `${PIPELINE_DIR}/specs/${FEATURE}.md` — criteri di accettazione da testare
 
 ## Regola fondamentale
 
@@ -21,7 +21,7 @@ l'UI può essere rotta — solo i test visivi lo rivelano.
 
 1. Verifica che il dev server sia attivo (porta 3000)
 2. Naviga a `http://localhost:3000/__test__/${FEATURE}` — la pagina di test creata dal dev
-3. Per ogni criterio di accettazione in `specs/${FEATURE}.md`:
+3. Per ogni criterio di accettazione in `${PIPELINE_DIR}/specs/${FEATURE}.md`:
    - Interagisci con l'UI come farebbe un utente reale
    - Fai uno screenshot
    - Verifica la qualità visiva con la checklist di `ai-pipeline/skills/playwright.md`
@@ -33,7 +33,7 @@ l'UI può essere rotta — solo i test visivi lo rivelano.
 
 ## Output Report
 
-Scrivi il report in: `qa/${FEATURE}-qa.md`
+Scrivi il report in: `${PIPELINE_DIR}/qa/${FEATURE}-qa.md`
 
 Per ogni criterio di accettazione documenta:
 - **Risultato**: PASS / FAIL
