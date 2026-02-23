@@ -43,7 +43,7 @@ source "${PIPELINE_DIR}/lib/playwright.sh"
 # ---------------------------------------------------------------------------
 # Trap
 # ---------------------------------------------------------------------------
-trap 'display_trap_cleanup; rm -f /tmp/pipeline-prompt.*.md; exit 1' INT TERM
+trap 'display_trap_cleanup; rm -f /tmp/pipeline-prompt-* /tmp/pipeline-reject-*; exit 1' INT TERM
 
 # ---------------------------------------------------------------------------
 # CLI parsing vars

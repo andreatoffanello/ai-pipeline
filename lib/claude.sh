@@ -75,6 +75,7 @@ claude_run() {
     # Costruisci --mcp-config se ci sono server MCP per questo step
     local mcp_flag=""
     local tmp_mcp=""
+    local final_tools="$allowed_tools"
     if [[ -n "$mcp_servers" ]] && [[ -f "${PIPELINE_DIR}/.mcp.json" ]]; then
         local filtered_mcp
         filtered_mcp=$(_claude_filter_mcp "$mcp_servers")
@@ -82,6 +83,10 @@ claude_run() {
             tmp_mcp=$(mktemp /tmp/pipeline-mcp-XXXXXX)
             echo "$filtered_mcp" > "$tmp_mcp"
             mcp_flag="--mcp-config ${tmp_mcp}"
+            # Aggiungi i tool MCP agli allowed_tools (mcp__<server> abilita tutti i tool del server)
+            for _srv in $mcp_servers; do
+                final_tools="${final_tools},mcp__${_srv}"
+            done
         fi
     fi
 
@@ -104,7 +109,7 @@ claude_run() {
         CLAUDECODE= claude -p \
             --verbose \
             --output-format stream-json \
-            --allowedTools "$allowed_tools" \
+            --allowedTools "$final_tools" \
             $model_flag \
             $mcp_flag \
             < "$prompt_file" \
@@ -251,15 +256,27 @@ if not tool_name:
     sys.exit(0)
 
 arg = ''
-for key in ['file_path', 'command', 'pattern', 'query', 'url']:
-    if key in inp:
-        val = str(inp[key])
-        if key == 'file_path':
-            val = os.path.basename(val)
-        else:
-            val = val[:60]
-        arg = val[:60]
-        break
+# Per i tool playwright estrai 'element' o 'text' come descrizione significativa
+if 'mcp__playwright__' in tool_name:
+    for key in ['element', 'text', 'url', 'selector', 'ref', 'query']:
+        if key in inp:
+            val = str(inp[key])
+            arg = val[:60]
+            break
+    # browser_fill_form: primo campo da 'fields' array
+    if not arg and 'fields' in inp and isinstance(inp['fields'], list) and inp['fields']:
+        first = inp['fields'][0]
+        arg = str(first.get('name', '') or first.get('ref', ''))[:60]
+else:
+    for key in ['file_path', 'command', 'pattern', 'query', 'url']:
+        if key in inp:
+            val = str(inp[key])
+            if key == 'file_path':
+                val = os.path.basename(val)
+            else:
+                val = val[:60]
+            arg = val[:60]
+            break
 
 print(f'{tool_name}  {arg}')
 " 2>/dev/null <<< "$line" || true

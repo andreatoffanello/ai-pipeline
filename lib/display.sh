@@ -102,11 +102,15 @@ display_step_waiting() {
 
 # ---------------------------------------------------------------------------
 # Stato interno spinner
+# File in $_SPINNER_TMPDIR:
+#   action  — "tool\narg" ultimo tool non-playwright
+#   pw_url  — URL corrente playwright (aggiornato da browser_navigate)
+#   pw_act  — "icon label" ultima azione playwright
+#   count   — una riga per ogni azione (wc -l = totale azioni)
 # ---------------------------------------------------------------------------
 _SPINNER_PID=""
 _SPINNER_TMPDIR=""
 _SPINNER_LINES_FILE=""
-_SPINNER_ACTION_COUNT=0
 _SPINNER_START_EPOCH=0
 _SPINNER_STEP_NAME=""
 
@@ -124,7 +128,6 @@ display_box_start() {
     _SPINNER_STEP_NAME="$step_name"
     _SPINNER_TMPDIR=$(mktemp -d)
     _SPINNER_LINES_FILE="$_SPINNER_TMPDIR/actions"
-    _SPINNER_ACTION_COUNT=0
     _SPINNER_START_EPOCH=$(date +%s)
     _SPINNER_PID=""
 
@@ -159,20 +162,76 @@ display_box_start() {
     printf "  ${BOLD}${CYAN}+----------------------------------------------------------+${NC}\n"
     printf "\n"
 
-    # Timer live su /dev/tty con \r
+    # Timer live a 2 righe su /dev/tty
+    # Riga 1: spinner + elapsed + ultimo tool regolare
+    # Riga 2: stato playwright (URL + ultima azione browser)
     local start_epoch="$_SPINNER_START_EPOCH"
+    local tmpdir="$_SPINNER_TMPDIR"
     (
         set +euo pipefail 2>/dev/null || true
-        local spin='|/-\'
+        local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+        local spin_len=10
         local i=0
+
+        # Riserva 2 righe
+        printf '\n\n' > /dev/tty
+
         while true; do
             local now elapsed mins secs
             now=$(date +%s)
             elapsed=$(( now - start_epoch ))
             mins=$(( elapsed / 60 ))
             secs=$(( elapsed % 60 ))
-            local c="${spin:$(( i % 4 )):1}"
-            printf "\r  ${DIM}%s  %dm%02ds${NC}  " "$c" "$mins" "$secs" > /dev/tty
+            local c="${spin:$(( i % spin_len )):1}"
+
+            # Leggi stato corrente dai file
+            local act_tool="" act_arg="" pw_url="" pw_act=""
+            if [[ -f "$tmpdir/action" ]]; then
+                act_tool=$(head -1 "$tmpdir/action" 2>/dev/null || true)
+                act_arg=$(tail -1 "$tmpdir/action" 2>/dev/null || true)
+            fi
+            [[ -f "$tmpdir/pw_url" ]] && pw_url=$(cat "$tmpdir/pw_url" 2>/dev/null || true)
+            [[ -f "$tmpdir/pw_act" ]] && pw_act=$(cat "$tmpdir/pw_act" 2>/dev/null || true)
+
+            # Colore per tool regolare
+            local acol='\033[2m'
+            case "$act_tool" in
+                Read)      acol='\033[0;36m' ;;
+                Write)     acol='\033[0;32m' ;;
+                Edit)      acol='\033[1;33m' ;;
+                Bash)      acol='\033[0;35m' ;;
+                Glob|Grep) acol='\033[0;34m' ;;
+            esac
+
+            # Abbrevia tool MCP non-playwright
+            local display_tool="$act_tool"
+            if [[ "$act_tool" == mcp__*__* ]]; then
+                display_tool="${act_tool##*__}"
+            fi
+
+            # Torna su 2 righe e sovrascrive
+            printf '\033[2A' > /dev/tty
+
+            # Riga 1: spinner + tempo + ultimo tool
+            if [[ -n "$act_tool" ]]; then
+                printf '\r\033[2K  \033[2m%s  %dm%02ds\033[0m  '"$acol"'%-10s\033[0m  \033[2m%s\033[0m\n' \
+                    "$c" "$mins" "$secs" "$display_tool" "${act_arg:0:50}" > /dev/tty
+            else
+                printf '\r\033[2K  \033[2m%s  %dm%02ds\033[0m\n' \
+                    "$c" "$mins" "$secs" > /dev/tty
+            fi
+
+            # Riga 2: playwright state (vuota se nessuna attività PW)
+            if [[ -n "$pw_url" ]]; then
+                local short_url="$pw_url"
+                short_url="${short_url#http://}"
+                short_url="${short_url#https://}"
+                printf '\r\033[2K  \033[2m🌐 %-32s › %s\033[0m\n' \
+                    "${short_url:0:32}" "${pw_act:-…}" > /dev/tty
+            else
+                printf '\r\033[2K\n' > /dev/tty
+            fi
+
             i=$(( i + 1 ))
             sleep 0.15
         done
@@ -182,16 +241,50 @@ display_box_start() {
 
 # ---------------------------------------------------------------------------
 # display_box_add_action <tool_type> <argument>
+# Scrive solo su file (IPC con spinner subshell). Nessun output diretto su tty.
 # ---------------------------------------------------------------------------
 display_box_add_action() {
     local tool="$1"
     local arg="$2"
+
+    # Log azioni (per debug/audit)
     if [[ -n "$_SPINNER_LINES_FILE" ]]; then
-        printf "%-8s %s\n" "$tool" "$arg" >> "$_SPINNER_LINES_FILE"
-        _SPINNER_ACTION_COUNT=$(( _SPINNER_ACTION_COUNT + 1 ))
-        local col
-        col=$(_tool_color "$tool")
-        printf "\r  %b%-8s${NC}  %s\n" "$col" "$tool" "$arg" > /dev/tty
+        printf "%-24s %s\n" "$tool" "$arg" >> "$_SPINNER_LINES_FILE"
+    fi
+
+    [[ -z "$_SPINNER_TMPDIR" ]] && return 0
+
+    # Contatore azioni (una riga per azione — wc -l in display_box_stop)
+    printf '1\n' >> "$_SPINNER_TMPDIR/count" 2>/dev/null || true
+
+    if [[ "$tool" == mcp__playwright__* ]]; then
+        # Tool playwright — aggiorna riga 2
+        local bname="${tool#mcp__playwright__browser_}"
+
+        local icon label
+        case "$bname" in
+            navigate)        icon="🔗"; label="navigate ${arg}"
+                             # Aggiorna URL corrente
+                             [[ -n "$arg" ]] && printf '%s' "$arg" > "$_SPINNER_TMPDIR/pw_url" 2>/dev/null || true
+                             ;;
+            snapshot)        icon="👁 "; label="snapshot" ;;
+            click)           icon="🖱 "; label="click ${arg}" ;;
+            type)            icon="⌨ "; label="type ${arg}" ;;
+            fill_form)       icon="📝"; label="fill form" ;;
+            take_screenshot) icon="📸"; label="screenshot" ;;
+            hover)           icon="🔍"; label="hover ${arg}" ;;
+            wait_for)        icon="⏳"; label="wait ${arg}" ;;
+            press_key)       icon="⌨ "; label="key ${arg}" ;;
+            scroll)          icon="📜"; label="scroll" ;;
+            run_code)        icon="▶ "; label="run ${arg}" ;;
+            evaluate)        icon="⚡"; label="eval ${arg}" ;;
+            *)               icon="🌐"; label="${bname} ${arg}" ;;
+        esac
+
+        printf '%s %s' "$icon" "${label:0:45}" > "$_SPINNER_TMPDIR/pw_act" 2>/dev/null || true
+    else
+        # Tool regolare — aggiorna riga 1
+        printf '%s\n%s' "$tool" "${arg:0:50}" > "$_SPINNER_TMPDIR/action" 2>/dev/null || true
     fi
 }
 
@@ -211,8 +304,19 @@ display_box_stop() {
         elapsed=$(( now - _SPINNER_START_EPOCH ))
         mins=$(( elapsed / 60 ))
         secs=$(( elapsed % 60 ))
-        printf "\r  ${GREEN}v${NC}  Step ${BOLD}%s${NC} completato in ${GREEN}%dm%02ds${NC}  ${DIM}(%d azioni)${NC}\n" \
-            "$_SPINNER_STEP_NAME" "$mins" "$secs" "$_SPINNER_ACTION_COUNT" > /dev/tty
+
+        # Conta azioni dal file (robusto anche da subshell pipe)
+        local action_count=0
+        if [[ -n "$_SPINNER_TMPDIR" && -f "$_SPINNER_TMPDIR/count" ]]; then
+            action_count=$(wc -l < "$_SPINNER_TMPDIR/count" | tr -d ' ' 2>/dev/null || echo 0)
+        fi
+
+        # Sovrascrive le 2 righe del spinner con il messaggio finale
+        printf '\033[2A\r\033[2K  %b✓%b  Step %b%s%b completato in %b%dm%02ds%b  %b(%d azioni)%b\n\r\033[2K\n' \
+            "$GREEN" "$NC" \
+            "$BOLD" "$_SPINNER_STEP_NAME" "$NC" \
+            "$GREEN" "$mins" "$secs" "$NC" \
+            "$DIM" "$action_count" "$NC" > /dev/tty
     fi
 
     if [[ -n "$_SPINNER_TMPDIR" ]]; then
@@ -362,9 +466,11 @@ display_gate_result() {
     if [[ "$result" == "APPROVED" ]]; then
         printf "\n  ${GREEN}v${NC}  Verdetto: ${BOLD}${GREEN}%s -- APPROVATO${NC}  ${DIM}%s${NC}\n" \
             "$step_name" "$elapsed"
+        _notify "✅ Gate Approvato" "approvato in ${elapsed}" "${PIPELINE_FEATURE:-} › ${step_name}"
     else
         printf "\n  ${RED}x${NC}  Verdetto: ${BOLD}${RED}%s -- RESPINTO${NC}  ${DIM}%s  %s${NC}\n" \
             "$step_name" "$elapsed" "$info"
+        _notify "❌ Gate Respinto" "${info}" "${PIPELINE_FEATURE:-} › ${step_name}"
     fi
 }
 
@@ -388,6 +494,24 @@ display_success() {
     done
     printf "  ${BOLD}${GREEN}+----------------------------------------------------------+${NC}\n"
     printf "\n"
+    _notify "🎉 Pipeline Completata" "completata in ${elapsed}" "${feature}"
+}
+
+# ---------------------------------------------------------------------------
+# _notify <title> <message> [subtitle]
+# Notifica macOS tramite osascript. No-op su sistemi non-macOS.
+# ---------------------------------------------------------------------------
+_notify() {
+    local title="$1"
+    local msg="$2"
+    local subtitle="${3:-}"
+    [[ "$(uname)" != "Darwin" ]] && return 0
+    command -v osascript &>/dev/null || return 0
+    if [[ -n "$subtitle" ]]; then
+        osascript -e "display notification \"${msg}\" with title \"${title}\" subtitle \"${subtitle}\"" &>/dev/null || true
+    else
+        osascript -e "display notification \"${msg}\" with title \"${title}\"" &>/dev/null || true
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -395,6 +519,7 @@ display_success() {
 # ---------------------------------------------------------------------------
 display_error() {
     printf "\n  ${RED}ERR  %s${NC}\n" "$1" >&2
+    _notify "⛔ Pipeline Error" "$1" "${PIPELINE_FEATURE:-pipeline}"
 }
 
 display_warn() {
