@@ -201,3 +201,162 @@ with open(sys.argv[1], 'w') as f:
     json.dump(data, f, indent=2)
 PYEOF
 }
+
+# ===========================================================================
+# Batch state management (batch-state.json)
+# ===========================================================================
+
+PIPELINE_BATCH_STATE_FILE="${PIPELINE_BATCH_STATE_FILE:-${PIPELINE_DIR}/batch-state.json}"
+
+# ---------------------------------------------------------------------------
+# batch_state_init <features_json>
+# Crea batch-state.json per una nuova esecuzione batch.
+# features_json: array JSON di nomi feature, es. '["feat1","feat2"]'
+# ---------------------------------------------------------------------------
+batch_state_init() {
+    local features_json="$1"
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    python3 - "$PIPELINE_BATCH_STATE_FILE" "$features_json" "$now" <<'PYEOF'
+import sys, json
+
+path = sys.argv[1]
+features = json.loads(sys.argv[2])
+now = sys.argv[3]
+
+data = {
+    "mode": "batch",
+    "started_at": now,
+    "updated_at": now,
+    "total": len(features),
+    "completed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "status": "running",
+    "features": {}
+}
+
+for f in features:
+    data["features"][f] = {"status": "pending"}
+
+with open(path, 'w') as fh:
+    json.dump(data, fh, indent=2)
+PYEOF
+}
+
+# ---------------------------------------------------------------------------
+# batch_state_feature_start <feature>
+# ---------------------------------------------------------------------------
+batch_state_feature_start() {
+    local feature="$1"
+    _batch_state_update_feature "$feature" "in_progress"
+}
+
+# ---------------------------------------------------------------------------
+# batch_state_feature_done <feature> <elapsed_str>
+# ---------------------------------------------------------------------------
+batch_state_feature_done() {
+    local feature="$1"
+    local elapsed="${2:-}"
+    _batch_state_update_feature "$feature" "completed" "$elapsed"
+}
+
+# ---------------------------------------------------------------------------
+# batch_state_feature_fail <feature> <exit_code>
+# ---------------------------------------------------------------------------
+batch_state_feature_fail() {
+    local feature="$1"
+    local exit_code="${2:-1}"
+    _batch_state_update_feature "$feature" "failed" "" "$exit_code"
+}
+
+# ---------------------------------------------------------------------------
+# batch_state_feature_skip <feature>
+# ---------------------------------------------------------------------------
+batch_state_feature_skip() {
+    local feature="$1"
+    _batch_state_update_feature "$feature" "skipped"
+}
+
+# ---------------------------------------------------------------------------
+# batch_state_done [status]
+# Finalizza il batch-state.json. Default status=completed.
+# ---------------------------------------------------------------------------
+batch_state_done() {
+    local status="${1:-completed}"
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    [[ ! -f "$PIPELINE_BATCH_STATE_FILE" ]] && return
+
+    python3 - "$PIPELINE_BATCH_STATE_FILE" "$status" "$now" <<'PYEOF'
+import sys, json
+
+path = sys.argv[1]
+status = sys.argv[2]
+now = sys.argv[3]
+
+with open(path) as f:
+    data = json.load(f)
+
+data["status"] = status
+data["updated_at"] = now
+
+completed = sum(1 for v in data["features"].values() if v["status"] == "completed")
+failed = sum(1 for v in data["features"].values() if v["status"] == "failed")
+skipped = sum(1 for v in data["features"].values() if v["status"] == "skipped")
+
+data["completed"] = completed
+data["failed"] = failed
+data["skipped"] = skipped
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+PYEOF
+}
+
+# ---------------------------------------------------------------------------
+# _batch_state_update_feature <feature> <status> [elapsed] [exit_code]
+# ---------------------------------------------------------------------------
+_batch_state_update_feature() {
+    local feature="$1"
+    local feature_status="$2"
+    local elapsed="${3:-}"
+    local exit_code="${4:-}"
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    [[ ! -f "$PIPELINE_BATCH_STATE_FILE" ]] && return
+
+    python3 - "$PIPELINE_BATCH_STATE_FILE" "$feature" "$feature_status" \
+        "$elapsed" "$exit_code" "$now" <<'PYEOF'
+import sys, json
+
+path = sys.argv[1]
+feature = sys.argv[2]
+status = sys.argv[3]
+elapsed = sys.argv[4]
+exit_code = sys.argv[5]
+now = sys.argv[6]
+
+with open(path) as f:
+    data = json.load(f)
+
+if feature not in data["features"]:
+    data["features"][feature] = {}
+
+data["features"][feature]["status"] = status
+if elapsed:
+    data["features"][feature]["elapsed"] = elapsed
+if exit_code:
+    data["features"][feature]["exit_code"] = int(exit_code)
+if status == "in_progress":
+    data["features"][feature]["started_at"] = now
+
+data["updated_at"] = now
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+PYEOF
+}

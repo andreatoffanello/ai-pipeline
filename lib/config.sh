@@ -38,7 +38,13 @@ def parse_yaml(text):
             continue
         key, _, val = stripped.partition(':')
         key = key.strip()
-        val = val.strip().strip('"\'')
+        raw = val.strip()
+        # Strip inline comments for unquoted values
+        if raw and not (raw.startswith('"') or raw.startswith("'")):
+            h = raw.find(' #')
+            if h >= 0:
+                raw = raw[:h].strip()
+        val = raw.strip('"\'')
         # pop stack to current indent level
         while len(stack) > 1 and stack[-1][0] >= indent:
             stack.pop()
@@ -129,7 +135,12 @@ for line in lines:
         if stripped.startswith('- name:'):
             break
         if stripped.startswith(f'{field}:'):
-            val = stripped.split(':', 1)[1].strip().strip('"\'')
+            raw = stripped.split(':', 1)[1].strip()
+            if raw and not (raw.startswith('"') or raw.startswith("'")):
+                h = raw.find(' #')
+                if h >= 0:
+                    raw = raw[:h].strip()
+            val = raw.strip('"\'')
             print(val)
             break
 PYEOF
@@ -223,10 +234,45 @@ for line in lines:
         if stripped and not line.startswith('    ') and not line.startswith('  '):
             break
         if stripped.startswith(f'{field}:'):
-            val = stripped.split(':', 1)[1].strip().strip('"\'')
+            raw = stripped.split(':', 1)[1].strip()
+            if raw and not (raw.startswith('"') or raw.startswith("'")):
+                h = raw.find(' #')
+                if h >= 0:
+                    raw = raw[:h].strip()
+            val = raw.strip('"\'')
             print(val)
             break
 PYEOF
+}
+
+# ---------------------------------------------------------------------------
+# config_step_needs_playwright <step_name>
+# Returns "true" if step has playwright: true, else "false"
+# ---------------------------------------------------------------------------
+config_step_needs_playwright() {
+    local step_name="$1"
+    local val
+    val=$(config_step_get "$step_name" "playwright")
+    if [[ "$val" == "true" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# config_step_allowed_tools <step_name>
+# Returns allowed_tools for step, falling back to defaults.allowed_tools
+# ---------------------------------------------------------------------------
+config_step_allowed_tools() {
+    local step_name="$1"
+    local val
+    val=$(config_step_get "$step_name" "allowed_tools")
+    if [[ -n "$val" ]]; then
+        echo "$val"
+    else
+        config_get_default "defaults.allowed_tools" "Read,Write,Edit,Bash,Glob,Grep"
+    fi
 }
 
 # ---------------------------------------------------------------------------

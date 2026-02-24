@@ -3,30 +3,40 @@
 # Copia in: my-project/ai-pipeline/pipeline.yaml
 
 pipeline:
-  name: my-project
+  name: thetis-pm
+
+project:
+  dev_host: localhost              # host del dev server (default localhost)
+  dev_port: 9999
+  dev_start: "pnpm run dev"        # o "yarn dev", "pnpm dev", ecc.
+  dev_start_timeout: 30           # secondi di attesa (default 30)
 
 defaults:
   provider: anthropic
   model: claude-sonnet-4-6
-  max_retries: 2
+  max_retries: 3
   allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
   token_max_retries: 5
   token_base_delay: 60
+  token_backoff_multiplier: 2
 
 steps:
   - name: pm
     description: "Product Manager — scrive la specifica"
     prompt: prompts/pm.md
+    prompt_section: "PM (Product Manager)"
     provider: anthropic
     model: claude-opus-4-6
     allowed_tools: "Read,Write,Edit,Glob,Grep"
     mcp_servers: []
     output: specs/${FEATURE}.md
     verdict: false
+    playwright: false
 
   - name: dr-spec
     description: "Design Reviewer — valida la specifica"
     prompt: prompts/dr-spec.md
+    prompt_section: "DR-SPEC (Design Reviewer)"
     provider: anthropic
     model: claude-sonnet-4-6
     allowed_tools: "Read,Write,Edit,Glob,Grep"
@@ -34,20 +44,43 @@ steps:
     output: reviews/${FEATURE}-spec.md
     verdict: true
     on_reject: pm
+    retry_step: pm
+    playwright: false
 
   - name: dev
     description: "Developer — implementa"
     prompt: prompts/dev.md
+    prompt_section: "DEV (Developer)"
     provider: anthropic
     model: claude-sonnet-4-6
     allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
-    mcp_servers: []
+    mcp_servers:
+      - playwright
+      - supabase
+      - fetch
     output: ""
     verdict: false
+    playwright: true
+
+  - name: dr-impl
+    description: "Design Reviewer — valida l'implementazione"
+    prompt: prompts/dr-impl.md
+    prompt_section: "DR-IMPL (Design Reviewer - Implementazione)"
+    provider: anthropic
+    model: claude-sonnet-4-6
+    allowed_tools: "Read,Write,Edit,Glob,Grep"
+    mcp_servers:
+      - playwright
+    output: reviews/${FEATURE}-impl.md
+    verdict: true
+    on_reject: dev
+    retry_step: dev
+    playwright: true
 
   - name: qa
     description: "QA — verifica i criteri di accettazione"
     prompt: prompts/qa.md
+    prompt_section: "QA (Quality Assurance)"
     provider: anthropic
     model: claude-sonnet-4-6
     allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
@@ -55,7 +88,24 @@ steps:
       - playwright
     output: qa/${FEATURE}-qa.md
     verdict: true
-    on_reject: dev
+    on_reject: dev-fix
+    retry_step: dev-fix
+    playwright: true
+
+  - name: dev-fix
+    description: "Developer — corregge da feedback QA"
+    prompt: prompts/dev-fix.md
+    prompt_section: "DEV-FIX (Developer Fix)"
+    provider: anthropic
+    model: claude-sonnet-4-6
+    allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
+    mcp_servers:
+      - playwright
+      - supabase
+      - fetch
+    output: ""
+    verdict: false
+    playwright: true
 
 providers:
   anthropic:

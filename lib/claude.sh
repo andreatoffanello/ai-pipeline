@@ -5,6 +5,9 @@
 CLAUDE_TOKEN_MAX_RETRIES="${CLAUDE_TOKEN_MAX_RETRIES:-5}"
 CLAUDE_TOKEN_BASE_DELAY="${CLAUDE_TOKEN_BASE_DELAY:-60}"
 
+# Array globale file modificati — popolato da claude_run
+CLAUDE_MODIFIED_FILES=()
+
 # ---------------------------------------------------------------------------
 # claude_setup_provider <provider_name> <model>
 # Configura le env vars per il provider specificato.
@@ -25,8 +28,7 @@ claude_setup_provider() {
     fi
 
     if [[ -n "$api_key_env" ]]; then
-        local api_key
-        eval "api_key=\${${api_key_env}:-}"
+        local api_key="${!api_key_env:-}"
         if [[ -z "$api_key" ]]; then
             display_warn "Provider ${provider}: env var ${api_key_env} not set"
         else
@@ -50,9 +52,10 @@ claude_setup_provider() {
 }
 
 # ---------------------------------------------------------------------------
-# claude_run <prompt_file> <step_name> <model> <allowed_tools> <mcp_servers>
+# claude_run <prompt_file> <step_name> <model> <allowed_tools> [mcp_servers]
 # Esegue claude CLI con stream-json, popola semi-log, gestisce token exhaustion.
 # Exit code: 0=success, 1=error, 75=token exhausted
+# Popola CLAUDE_MODIFIED_FILES (array) con i file scritti/modificati.
 # ---------------------------------------------------------------------------
 claude_run() {
     local prompt_file="$1"
@@ -61,20 +64,29 @@ claude_run() {
     local allowed_tools="${4:-Read,Write,Edit,Bash,Glob,Grep}"
     local mcp_servers="${5:-}"
 
+    CLAUDE_MODIFIED_FILES=()
+
     local log_dir="${PIPELINE_DIR}/logs"
     local log_file="${log_dir}/${PIPELINE_FEATURE}-${step_name}.log"
+    local files_tmp
+    files_tmp=$(mktemp)
     mkdir -p "$log_dir"
 
     # Costruisci --mcp-config se ci sono server MCP per questo step
     local mcp_flag=""
     local tmp_mcp=""
+    local final_tools="$allowed_tools"
     if [[ -n "$mcp_servers" ]] && [[ -f "${PIPELINE_DIR}/.mcp.json" ]]; then
         local filtered_mcp
         filtered_mcp=$(_claude_filter_mcp "$mcp_servers")
         if [[ -n "$filtered_mcp" ]]; then
-            tmp_mcp=$(mktemp /tmp/pipeline-mcp.XXXXXX.json)
+            tmp_mcp=$(mktemp /tmp/pipeline-mcp-XXXXXX)
             echo "$filtered_mcp" > "$tmp_mcp"
             mcp_flag="--mcp-config ${tmp_mcp}"
+            # Aggiungi i tool MCP agli allowed_tools (mcp__<server> abilita tutti i tool del server)
+            for _srv in $mcp_servers; do
+                final_tools="${final_tools},mcp__${_srv}"
+            done
         fi
     fi
 
@@ -89,6 +101,7 @@ claude_run() {
     while true; do
         attempt=$(( attempt + 1 ))
         > "$log_file"
+        > "$files_tmp"
         claude_exit=0
 
         # CLAUDECODE= evita conflitti se lanciato da dentro Claude Code interattivo
@@ -96,7 +109,7 @@ claude_run() {
         CLAUDECODE= claude -p \
             --verbose \
             --output-format stream-json \
-            --allowedTools "$allowed_tools" \
+            --allowedTools "$final_tools" \
             $model_flag \
             $mcp_flag \
             < "$prompt_file" \
@@ -110,6 +123,14 @@ claude_run() {
                 tool_type="${action%%  *}"
                 tool_arg="${action#*  }"
                 display_box_add_action "$tool_type" "$tool_arg"
+                # Traccia file scritti/modificati
+                if [[ "$tool_type" == "Write" || "$tool_type" == "Edit" ]]; then
+                    local full_path
+                    full_path=$(_claude_parse_file_path "$json_line")
+                    if [[ -n "$full_path" ]]; then
+                        echo "$full_path" >> "$files_tmp"
+                    fi
+                fi
             fi
         done || claude_exit=$?
 
@@ -120,6 +141,7 @@ claude_run() {
         if _claude_is_token_exhausted "$claude_exit" "${log_file}.stderr"; then
             if [[ $attempt -ge $CLAUDE_TOKEN_MAX_RETRIES ]]; then
                 display_error "Token esaurito dopo ${attempt} tentativi — step: ${step_name}"
+                rm -f "$files_tmp"
                 return 75
             fi
             local delay=$(( CLAUDE_TOKEN_BASE_DELAY * ( 2 ** (attempt - 1) ) ))
@@ -130,6 +152,21 @@ claude_run() {
 
         break
     done
+
+    # Deduplicazione file modificati → array globale
+    if [[ -f "$files_tmp" ]]; then
+        local seen=()
+        while IFS= read -r fpath; do
+            [[ -z "$fpath" ]] && continue
+            local already=false
+            for s in "${seen[@]:-}"; do [[ "$s" == "$fpath" ]] && already=true && break; done
+            if [[ "$already" == "false" ]]; then
+                seen+=("$fpath")
+                CLAUDE_MODIFIED_FILES+=("$fpath")
+            fi
+        done < "$files_tmp"
+        rm -f "$files_tmp"
+    fi
 
     return $claude_exit
 }
@@ -163,45 +200,101 @@ _claude_countdown() {
     printf "\r\033[K"
 }
 
+_claude_parse_file_path() {
+    local line="$1"
+    python3 -c "
+import sys, json, os
+
+try:
+    d = json.loads(sys.stdin.read())
+except:
+    sys.exit(0)
+
+inp = {}
+
+# Formato Claude Code stream-json: {type:'assistant', message:{content:[{type:'tool_use',...}]}}
+if d.get('type') == 'assistant':
+    content = d.get('message', {}).get('content', [])
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'tool_use':
+                inp = item.get('input', {})
+                break
+
+# Formato content_block_start
+if not inp and 'content_block' in d and isinstance(d.get('content_block'), dict):
+    cb = d['content_block']
+    if cb.get('type') == 'tool_use':
+        inp = cb.get('input', {})
+
+# Formato standalone tool_use
+if not inp and d.get('type') == 'tool_use':
+    inp = d.get('input', {})
+
+fp = inp.get('file_path', '')
+if fp:
+    if not os.path.isabs(fp):
+        fp = os.path.join(os.environ.get('PIPELINE_DIR', ''), '..', fp)
+    print(os.path.normpath(fp))
+" 2>/dev/null <<< "$line" || true
+}
+
 _claude_parse_tool_use() {
     local line="$1"
     python3 -c "
 import sys, json, os
 
 try:
-    d = json.loads('''${line//\'/\'\\\'\'}''')
+    d = json.loads(sys.stdin.read())
 except:
-    try:
-        import sys
-        d = json.loads(sys.stdin.read())
-    except:
-        sys.exit(0)
+    sys.exit(0)
 
 tool_name = ''
 inp = {}
 
-if d.get('type') == 'tool_use' and 'name' in d:
-    tool_name = d['name']
-    inp = d.get('input', {})
-elif 'content_block' in d and isinstance(d.get('content_block'), dict):
+# Formato Claude Code stream-json: {type:'assistant', message:{content:[{type:'tool_use',...}]}}
+if d.get('type') == 'assistant':
+    content = d.get('message', {}).get('content', [])
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'tool_use' and 'name' in item:
+                tool_name = item['name']
+                inp = item.get('input', {})
+                break
+
+# Formato content_block_start
+if not tool_name and 'content_block' in d and isinstance(d.get('content_block'), dict):
     cb = d['content_block']
     if cb.get('type') == 'tool_use' and 'name' in cb:
         tool_name = cb['name']
         inp = cb.get('input', {})
 
+# Formato standalone tool_use
+if not tool_name and d.get('type') == 'tool_use' and 'name' in d:
+    tool_name = d['name']
+    inp = d.get('input', {})
+
 if not tool_name:
     sys.exit(0)
 
 arg = ''
-for key in ['file_path', 'command', 'pattern', 'query', 'url']:
-    if key in inp:
-        val = str(inp[key])
-        if key == 'file_path':
-            val = os.path.basename(val)
-        else:
-            val = val[:60]
-        arg = val[:60]
-        break
+# Per i tool playwright estrai 'element' o 'text' come descrizione significativa
+if 'playwright' in tool_name:
+    for key in ['element', 'text', 'url', 'selector', 'ref', 'query']:
+        if key in inp:
+            arg = str(inp[key])[:60]
+            break
+    if not arg and 'fields' in inp and isinstance(inp['fields'], list) and inp['fields']:
+        first = inp['fields'][0]
+        arg = str(first.get('name', '') or first.get('ref', ''))[:60]
+else:
+    for key in ['file_path', 'command', 'pattern', 'query', 'url']:
+        if key in inp:
+            val = str(inp[key])
+            if key == 'file_path':
+                val = os.path.basename(val)
+            arg = val[:60]
+            break
 
 print(f'{tool_name}  {arg}')
 " 2>/dev/null <<< "$line" || true
@@ -214,14 +307,32 @@ _claude_filter_mcp() {
     [[ ! -f "$mcp_file" ]] && echo "" && return
 
     python3 - "$mcp_file" "$servers_space" <<'PYEOF'
-import sys, json
+import sys, json, os
 
 with open(sys.argv[1]) as f:
     mcp_config = json.load(f)
 
 requested = sys.argv[2].split()
 servers = mcp_config.get('mcpServers', {})
-filtered = {k: v for k, v in servers.items() if k in requested}
+filtered = {k: dict(v) for k, v in servers.items() if k in requested}
+
+# Inietta --output-dir per il server playwright se PLAYWRIGHT_OUTPUT_DIR è settato
+output_dir = os.environ.get('PLAYWRIGHT_OUTPUT_DIR', '')
+if output_dir and 'playwright' in filtered:
+    args = list(filtered['playwright'].get('args', []))
+    # Rimuovi eventuale --output-dir precedente
+    new_args = []
+    skip_next = False
+    for a in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if a == '--output-dir':
+            skip_next = True
+            continue
+        new_args.append(a)
+    new_args.extend(['--output-dir', output_dir])
+    filtered['playwright']['args'] = new_args
 
 if filtered:
     print(json.dumps({'mcpServers': filtered}, indent=2))
