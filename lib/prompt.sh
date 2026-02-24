@@ -70,30 +70,42 @@ prompt_get_feature_brief() {
 }
 
 # ---------------------------------------------------------------------------
-# prompt_build_revalidation_context <retry_num> <max_retries> <feedback_file>
+# prompt_build_revalidation_context <retry_num> <max_retries> <feedback_file> [step]
 # Genera il blocco testo per ri-validazione dopo un gate REJECTED
 # ---------------------------------------------------------------------------
 prompt_build_revalidation_context() {
     local retry_num="$1"
     local max_retries="$2"
     local feedback_file="$3"
+    local step="${4:-}"
 
     local feedback=""
     [[ -f "$feedback_file" ]] && feedback=$(cat "$feedback_file")
 
+    # Messaggio agente-specifico
+    local agent_msg="L'autore ha aggiornato l'artefatto per correggere queste revisioni."
+    case "$step" in
+        pm)   agent_msg="Il PM ha aggiornato la specifica per correggere queste revisioni." ;;
+        dev|dev-fix) agent_msg="Il developer ha aggiornato l'implementazione per correggere queste revisioni." ;;
+        dr-spec|dr-impl) agent_msg="Il reviewer sta ri-validando dopo la correzione dell'autore." ;;
+    esac
+
     cat << EOF
 QUESTA È UNA RI-VALIDAZIONE (retry ${retry_num}/${max_retries}).
-Le revisioni precedenti erano:
+
+Le revisioni aperte dal round precedente erano:
 ---
 ${feedback}
 ---
-Il developer ha aggiornato l'implementazione per correggere queste revisioni.
-ISTRUZIONI PER LA RI-VALIDAZIONE:
-1. Verifica SOLO che le revisioni precedenti siano state corrette
-2. Per ogni revisione precedente, indica se è stata risolta o no
-3. NON aggiungere nuove revisioni che non erano presenti prima
-4. Se tutte le revisioni precedenti sono risolte, scrivi APPROVED nel file .verdict
-5. Se alcune non sono risolte, scrivi REJECTED nel .verdict e elenca SOLO quelle ancora aperte
+
+${agent_msg}
+
+ISTRUZIONI OBBLIGATORIE PER LA RI-VALIDAZIONE:
+1. Leggi il file aggiornato — non fare affidamento sulla memoria di round precedenti
+2. Per ogni REV elencata sopra, cerca nella spec/implementazione la correzione corrispondente
+3. Marca esplicitamente ogni REV come "RESOLVED ✓" o "OPEN ✗" con motivazione
+4. NON aggiungere nuove revisioni che non erano presenti nel round precedente
+5. Il verdetto è binario: anche una sola REV OPEN → REJECTED. Tutte RESOLVED → APPROVED
 EOF
 }
 

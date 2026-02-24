@@ -293,7 +293,7 @@ _run_pipeline() {
             local extra_ctx=""
             if [[ $retries -gt 0 ]] && [[ -n "$on_reject" ]] && [[ -n "$output" ]]; then
                 local review_file="${PIPELINE_DIR}/${output}"
-                extra_ctx=$(prompt_build_revalidation_context "$retries" "$max_retries" "$review_file")
+                extra_ctx=$(prompt_build_revalidation_context "$retries" "$max_retries" "$review_file" "$step_name")
             fi
 
             prompt_build "$step_name" "$PIPELINE_FEATURE" "$extra_ctx" > "$final_prompt" || {
@@ -325,8 +325,10 @@ _run_pipeline() {
             fi
 
             # Esegui
+            local display_tools="$allowed_tools"
+            [[ -n "$mcp_servers" ]] && display_tools="${display_tools} +mcp(${mcp_servers// /,})"
             display_box_start "$step_name" "${model:-default}" "$step_counter" "$total_steps" \
-                "$allowed_tools" "$output"
+                "$display_tools" "$output"
 
             local claude_exit=0
             claude_run "$final_prompt" "$step_name" "$model" \

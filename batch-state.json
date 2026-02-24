@@ -1,0 +1,25 @@
+{
+  "mode": "batch",
+  "started_at": "2026-02-24T14:57:27Z",
+  "updated_at": "2026-02-24T14:57:27Z",
+  "total": 4,
+  "completed": 0,
+  "failed": 0,
+  "skipped": 0,
+  "status": "running",
+  "features": {
+    "fase-5-comunicazione": {
+      "status": "in_progress",
+      "started_at": "2026-02-24T14:57:27Z"
+    },
+    "fase-6-roadmap": {
+      "status": "pending"
+    },
+    "fase-7-wiki": {
+      "status": "pending"
+    },
+    "fase-8-rifinimento": {
+      "status": "pending"
+    }
+  }
+}

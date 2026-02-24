@@ -128,10 +128,14 @@ playwright_require_server() {
 # ---------------------------------------------------------------------------
 # playwright_setup_screenshot_dir <feature> <step>
 # Crea la directory per gli screenshot e la esporta in PLAYWRIGHT_OUTPUT_DIR.
+# La directory è alla root del progetto (non dentro ai-pipeline/) perché
+# Claude Code usa la root del progetto come working directory per i path relativi.
 # ---------------------------------------------------------------------------
 playwright_setup_screenshot_dir() {
     local feature="$1"
     local step="$2"
+    # Salva DENTRO ai-pipeline/screenshots/ così rimane tutto organizzato
+    # nel repository della pipeline e non nella root del progetto.
     local dir="${PIPELINE_DIR}/screenshots/${feature}/${step}"
     mkdir -p "$dir"
     PLAYWRIGHT_OUTPUT_DIR="$dir"
@@ -155,15 +159,23 @@ playwright_inject_prompt_instruction() {
     # Blocco screenshot (condizionale)
     local screenshot_block=""
     if [[ -n "$screenshot_dir" ]]; then
-        local rel_dir="${screenshot_dir#$PIPELINE_DIR/}"
+        # Path relativo alla root del progetto (cwd di Claude Code).
+        # PIPELINE_DIR è sempre [project]/ai-pipeline, quindi il path relativo
+        # dalla project root è sempre "ai-pipeline/screenshots/feature/step".
+        local project_dir
+        project_dir="$(dirname "$PIPELINE_DIR")"
+        local rel_dir="${screenshot_dir#$project_dir/}"
         screenshot_block="
-## Screenshot automatici
+## Screenshot obbligatori
 
-Tutti gli screenshot fatti con \`browser_take_screenshot\` vengono salvati
-automaticamente in: \`${rel_dir}/\`
+Salva gli screenshot con \`browser_take_screenshot\` usando \`filename\` con
+path relativo alla root del progetto, dentro la cartella assegnata a questo step:
 
-Puoi trovare screenshot degli step precedenti in:
-\`screenshots/${PIPELINE_FEATURE:-}/\`
+  \`${rel_dir}/01-nome-descrittivo.png\`
+
+Numera sempre gli screenshot in ordine (01-, 02-, 03-…) per facilitarne la revisione.
+
+Screenshot degli step precedenti disponibili in: \`ai-pipeline/screenshots/${PIPELINE_FEATURE:-}/\`
 "
     fi
 
@@ -180,13 +192,16 @@ Il dev server è attivo su ${base_url}.
    \`\`\`
 2. Usare il MCP Playwright (browser_navigate + browser_snapshot)
    per navigare le pagine rilevanti e osservare il risultato visivo reale nel browser.
-3. Basare il tuo output e le tue conclusioni ESCLUSIVAMENTE su ciò che hai visto nel browser,
+3. **Scorrere le pagine** con \`browser_scroll\` (direction: "down") per vedere il contenuto
+   sotto il fold — su liste, accordion, tabelle, form lunghi devi sempre scrollare per vedere tutto.
+4. Basare il tuo output e le tue conclusioni ESCLUSIVAMENTE su ciò che hai visto nel browser,
    non solo sui file sorgente.
 
 **Non è accettabile:**
 - Fare solo code review statica dei file sorgente
 - Saltare la verifica nel browser
 - Scrivere "da verificare" o "non verificabile" per elementi visivi
+- Fermarsi al contenuto above the fold senza scrollare
 ${screenshot_block}
 ---
 
@@ -200,13 +215,16 @@ Il dev server è attivo su ${base_url} (verificato dalla pipeline).
 **Devi obbligatoriamente:**
 1. Usare il MCP Playwright (browser_navigate + browser_snapshot)
    per navigare le pagine rilevanti e osservare il risultato visivo reale nel browser.
-2. Basare il tuo output e le tue conclusioni ESCLUSIVAMENTE su ciò che hai visto nel browser,
+2. **Scorrere le pagine** con \`browser_scroll\` (direction: "down") per vedere il contenuto
+   sotto il fold — su liste, accordion, tabelle, form lunghi devi sempre scrollare per vedere tutto.
+3. Basare il tuo output e le tue conclusioni ESCLUSIVAMENTE su ciò che hai visto nel browser,
    non solo sui file sorgente.
 
 **Non è accettabile:**
 - Fare solo code review statica dei file sorgente
 - Saltare la verifica nel browser
 - Scrivere "da verificare" o "non verificabile" per elementi visivi
+- Fermarsi al contenuto above the fold senza scrollare
 - Dichiarare che il server non è attivo: la pipeline ha già verificato che risponde su ${base_url}
 ${screenshot_block}
 ---
@@ -264,6 +282,6 @@ playwright_check_step() {
     [[ "$step_tools" == *"Bash"* ]] && has_bash="true"
 
     playwright_inject_prompt_instruction "$prompt_file" "$base_url" "$has_bash" "$PLAYWRIGHT_OUTPUT_DIR"
-    display_info "${step}: Playwright → ${base_url} | screenshot → screenshots/${feature}/${step}/"
+    display_info "${step}: Playwright → ${base_url} | screenshot → ai-pipeline/screenshots/${feature}/${step}/"
     return 0
 }

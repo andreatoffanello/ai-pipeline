@@ -6,6 +6,7 @@ completa per la feature: **${FEATURE}**.
 ## Prima di iniziare
 
 Leggi questi file di contesto del progetto:
+- `ai-pipeline/conventions/visual.md` — standard estetico obbligatorio: la spec **deve** coprire esplicitamente hover state, focus state (`:focus-visible`), transizioni, responsività mobile, dark mode, squircle progressive enhancement. Se mancano, il Design Reviewer rigetta.
 - `ai-pipeline/conventions/stack.md` — stack tecnologico, capire cosa è possibile fare
 - `ai-pipeline/conventions/code.md` — standard qualitativi, per scrivere criteri verificabili
 
@@ -19,6 +20,26 @@ Leggi questi file di contesto del progetto:
    - **Criteri di accettazione**: formato BDD (Dato/Quando/Allora), verificabili e precisi
    - **Edge cases**: scenari limite, stati di errore, casi non ovvi
    - **Note tecniche**: vincoli di implementazione rilevanti per lo stack
+
+## Se stai correggendo una spec già esistente (modalità revisione)
+
+Quando ricevi un FEEDBACK DALLA REVISIONE, **leggi prima il file spec esistente**, poi:
+
+1. **Elenca ogni revisione aperta** (REV-001, REV-002, …) con una riga per ciascuna
+2. **Per ogni revisione**, descrivi in una frase cosa hai modificato nella spec
+3. **Non saltare nessuna revisione**: se il feedback ne elenca 6, devi rispondere a tutte e 6, anche solo per confermare la correzione applicata
+4. Solo dopo questa lista procedi a scrivere la spec aggiornata
+
+**Formato obbligatorio all'inizio del file spec (sezione "Revisioni applicate"):**
+
+```
+## Revisioni applicate
+- REV-001: [descrizione breve della correzione applicata]
+- REV-002: [descrizione breve della correzione applicata]
+...
+```
+
+Questa sezione viene rimossa dal reviewer dopo l'approvazione.
 
 ## Output
 

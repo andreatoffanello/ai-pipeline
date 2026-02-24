@@ -27,6 +27,15 @@ Analizza la specifica su queste dimensioni:
 
 Per ogni problema trovato, crea una revisione numerata (REV-001, REV-002, ...).
 
+## Verdetto
+
+Il verdetto è **binario**: nessuna via di mezzo.
+
+- **APPROVED**: zero revisioni aperte. La specifica può procedere all'implementazione.
+- **REJECTED**: almeno una revisione aperta. Non importa quante siano risolte: se ne rimane anche una sola, il verdetto è REJECTED.
+
+Non esiste "APPROVATA CON REVISIONI" o altri stati intermedi.
+
 ## Output Report
 
 Scrivi il report in: `${PIPELINE_DIR}/reviews/${FEATURE}-spec.md`
@@ -35,21 +44,33 @@ Scrivi il report in: `${PIPELINE_DIR}/reviews/${FEATURE}-spec.md`
 # Review Specifica: ${FEATURE}
 
 ## Valutazione Generale
-[Giudizio sintetico: APPROVATA / APPROVATA CON REVISIONI / NON APPROVATA]
+
+**[APPROVED | REJECTED]**
 [Motivazione in 2-3 righe]
 
 ## Revisioni Richieste
+<!-- Ometti questa sezione se APPROVED -->
 
 ### REV-001: [Titolo problema]
-**Problema:** [descrizione precisa]
-**Criterio coinvolto:** AC-XXX
-**Soluzione proposta:** [come correggere]
+**Problema:** [descrizione precisa del problema — non ambigua, non interpretabile]
+**Criterio coinvolto:** AC-XXX (o "Note Tecniche" se il problema è strutturale)
+**Soluzione richiesta:** [esattamente cosa deve comparire nella spec corretta — testo letterale se possibile]
 
 ### REV-002: ...
 
 ## Conclusioni
-[Se approvata: cosa rende la specifica solida]
-[Se non approvata: cosa deve essere riscritto]
+[Se APPROVED: perché la specifica è solida e pronta all'implementazione]
+[Se REJECTED: elenco numerato delle N revisioni ancora aperte]
 ```
+
+## Se stai ri-validando (retry)
+
+Quando ricevi un contesto di ri-validazione:
+
+1. **Leggi la spec aggiornata** — non fare affidamento sulla memoria
+2. **Per ogni REV precedente**, cerca nella spec la correzione corrispondente
+3. **Marca ogni REV come RESOLVED o OPEN** — non importa cosa dice il PM, conta solo ciò che trovi nella spec
+4. **NON aggiungere nuove revisioni** che non erano presenti nel round precedente
+5. Se anche solo una REV è OPEN → REJECTED. Se tutte le REV sono RESOLVED → APPROVED
 
 (La gate instruction con le istruzioni per il verdict verrà aggiunta automaticamente dalla pipeline)

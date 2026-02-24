@@ -257,9 +257,9 @@ display_box_add_action() {
     # Contatore azioni (una riga per azione — wc -l in display_box_stop)
     printf '1\n' >> "$_SPINNER_TMPDIR/count" 2>/dev/null || true
 
-    if [[ "$tool" == mcp__playwright__* ]]; then
-        # Tool playwright — aggiorna riga 2
-        local bname="${tool#mcp__playwright__browser_}"
+    if [[ "$tool" == *"playwright"*"browser_"* ]]; then
+        # Tool playwright (pipeline mcp__playwright__* o plugin mcp__plugin_playwright_*) — aggiorna riga 2
+        local bname="${tool##*browser_}"
 
         local icon label
         case "$bname" in
@@ -377,8 +377,8 @@ display_file_changes() {
         [[ $removed -gt 0 ]] && stat_str="${stat_str}${RED}-${removed}${NC}"
         [[ -z "$stat_str" ]]  && stat_str="${DIM}~${NC}"
 
-        printf "  ${DIM}|${NC}  %-38s  %b  ${DIM}%s${NC}\n" \
-            "$display_path" "$stat_str" "$mtime"
+        printf "  ${DIM}|  %s${NC}  %-38s  %b\n" \
+            "$mtime" "$display_path" "$stat_str"
     done
 
     printf "  ${DIM}+----------------------------------------------------------+${NC}\n"
@@ -396,14 +396,17 @@ display_screenshots_saved() {
 
     local count=0
     local files
-    files=$(find "$dir" -maxdepth 1 \( -name "*.png" -o -name "*.jpeg" -o -name "*.jpg" \) 2>/dev/null || true)
+    files=$(find "$dir" -maxdepth 1 \( -name "*.png" -o -name "*.jpeg" -o -name "*.jpg" -o -name "*.webp" \) 2>/dev/null || true)
     if [[ -n "$files" ]]; then
         count=$(echo "$files" | wc -l | tr -d ' ')
     fi
 
     if [[ $count -gt 0 ]]; then
-        local rel_dir="${dir#$PIPELINE_DIR/}"
-        printf "  ${DIM}📸 %d screenshot salvati → %s${NC}\n" "$count" "$rel_dir"
+        # Mostra path relativo al progetto (non a pipeline dir)
+        local project_dir
+        project_dir="$(dirname "$PIPELINE_DIR")"
+        local rel_dir="${dir#$project_dir/}"
+        printf "  ${DIM}📸 %d screenshot → %s${NC}\n" "$count" "$rel_dir"
     fi
 }
 
@@ -422,41 +425,53 @@ import sys, re
 path = sys.argv[1]
 try:
     with open(path) as f:
-        lines = f.readlines()
+        content = f.read()
+        lines = content.splitlines()
 except:
     sys.exit(0)
 
-keywords = re.compile(r'(motiv|reject|problem|issue|critic|mancant|errat|non conform|da corregger|fallito|fail|bloccat)', re.I)
-section_header = re.compile(r'^#{1,3}\s+')
-
 output = []
-in_section = False
-for line in lines:
-    stripped = line.rstrip()
-    if not stripped:
-        continue
-    if section_header.match(stripped) and keywords.search(stripped):
-        in_section = True
-        output.append(stripped)
-        continue
-    if section_header.match(stripped) and in_section:
-        break
-    if in_section:
-        output.append(stripped)
-        if len(output) >= 12:
-            break
 
+# 1. Cerca REV-XXX e mostra titolo + prima riga del problema
+rev_pattern = re.compile(r'^#{1,4}\s+(REV-\d+[^:]*:.*)', re.I)
+prob_pattern = re.compile(r'^\*\*Problema[:\*]+\*?\*?\s*(.*)', re.I)
+
+i = 0
+rev_count = 0
+while i < len(lines):
+    m = rev_pattern.match(lines[i].rstrip())
+    if m:
+        rev_count += 1
+        title = m.group(1).strip()
+        # Cerca **Problema:** nella prossima riga
+        prob = ''
+        for j in range(i+1, min(i+5, len(lines))):
+            pm = prob_pattern.match(lines[j].rstrip())
+            if pm:
+                prob = pm.group(1).strip()
+                break
+        output.append(f'REV: {title}')
+        if prob:
+            output.append(f'     {prob[:70]}')
+    i += 1
+
+# 2. Se nessun REV trovato, mostra valutazione generale (prime 8 righe non vuote)
 if not output:
     count = 0
     for line in lines:
         stripped = line.rstrip()
-        if stripped:
+        if stripped and not stripped.startswith('---'):
+            stripped = re.sub(r'^#{1,4}\s+', '', stripped)
+            stripped = stripped.replace('**', '')
             output.append(stripped)
             count += 1
-            if count >= 6:
+            if count >= 8:
                 break
 
-print('\n'.join(output[:12]))
+if rev_count > 0:
+    output.insert(0, f'{rev_count} revisioni aperte:')
+
+print('\n'.join(output[:20]))
 PYEOF
 )
 
@@ -464,12 +479,9 @@ PYEOF
 
     printf "\n"
     printf "  ${RED}+----------------------------------------------------------+${NC}\n"
-    printf "  ${RED}|  Motivo rejection                                        |${NC}\n"
+    printf "  ${RED}|  Revisioni aperte                                        |${NC}\n"
     printf "  ${RED}+----------------------------------------------------------+${NC}\n"
     while IFS= read -r line; do
-        line="${line#\#\#\# }"
-        line="${line#\#\# }"
-        line="${line#\# }"
         printf "  ${RED}|${NC}  ${DIM}%-56s${NC}${RED}|${NC}\n" "${line:0:56}"
     done <<< "$summary"
     printf "  ${RED}+----------------------------------------------------------+${NC}\n"

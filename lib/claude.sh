@@ -206,17 +206,30 @@ _claude_parse_file_path() {
 import sys, json, os
 
 try:
-    d = json.loads('''${line//\'/\'\\\\\'\'}''')
+    d = json.loads(sys.stdin.read())
 except:
     sys.exit(0)
 
 inp = {}
-if d.get('type') == 'tool_use':
-    inp = d.get('input', {})
-elif 'content_block' in d and isinstance(d.get('content_block'), dict):
+
+# Formato Claude Code stream-json: {type:'assistant', message:{content:[{type:'tool_use',...}]}}
+if d.get('type') == 'assistant':
+    content = d.get('message', {}).get('content', [])
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'tool_use':
+                inp = item.get('input', {})
+                break
+
+# Formato content_block_start
+if not inp and 'content_block' in d and isinstance(d.get('content_block'), dict):
     cb = d['content_block']
     if cb.get('type') == 'tool_use':
         inp = cb.get('input', {})
+
+# Formato standalone tool_use
+if not inp and d.get('type') == 'tool_use':
+    inp = d.get('input', {})
 
 fp = inp.get('file_path', '')
 if fp:
@@ -232,38 +245,45 @@ _claude_parse_tool_use() {
 import sys, json, os
 
 try:
-    d = json.loads('''${line//\'/\'\\\\\'\'}''')
+    d = json.loads(sys.stdin.read())
 except:
-    try:
-        import sys
-        d = json.loads(sys.stdin.read())
-    except:
-        sys.exit(0)
+    sys.exit(0)
 
 tool_name = ''
 inp = {}
 
-if d.get('type') == 'tool_use' and 'name' in d:
-    tool_name = d['name']
-    inp = d.get('input', {})
-elif 'content_block' in d and isinstance(d.get('content_block'), dict):
+# Formato Claude Code stream-json: {type:'assistant', message:{content:[{type:'tool_use',...}]}}
+if d.get('type') == 'assistant':
+    content = d.get('message', {}).get('content', [])
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'tool_use' and 'name' in item:
+                tool_name = item['name']
+                inp = item.get('input', {})
+                break
+
+# Formato content_block_start
+if not tool_name and 'content_block' in d and isinstance(d.get('content_block'), dict):
     cb = d['content_block']
     if cb.get('type') == 'tool_use' and 'name' in cb:
         tool_name = cb['name']
         inp = cb.get('input', {})
+
+# Formato standalone tool_use
+if not tool_name and d.get('type') == 'tool_use' and 'name' in d:
+    tool_name = d['name']
+    inp = d.get('input', {})
 
 if not tool_name:
     sys.exit(0)
 
 arg = ''
 # Per i tool playwright estrai 'element' o 'text' come descrizione significativa
-if 'mcp__playwright__' in tool_name:
+if 'playwright' in tool_name:
     for key in ['element', 'text', 'url', 'selector', 'ref', 'query']:
         if key in inp:
-            val = str(inp[key])
-            arg = val[:60]
+            arg = str(inp[key])[:60]
             break
-    # browser_fill_form: primo campo da 'fields' array
     if not arg and 'fields' in inp and isinstance(inp['fields'], list) and inp['fields']:
         first = inp['fields'][0]
         arg = str(first.get('name', '') or first.get('ref', ''))[:60]
@@ -273,8 +293,6 @@ else:
             val = str(inp[key])
             if key == 'file_path':
                 val = os.path.basename(val)
-            else:
-                val = val[:60]
             arg = val[:60]
             break
 
