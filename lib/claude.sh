@@ -289,14 +289,32 @@ _claude_filter_mcp() {
     [[ ! -f "$mcp_file" ]] && echo "" && return
 
     python3 - "$mcp_file" "$servers_space" <<'PYEOF'
-import sys, json
+import sys, json, os
 
 with open(sys.argv[1]) as f:
     mcp_config = json.load(f)
 
 requested = sys.argv[2].split()
 servers = mcp_config.get('mcpServers', {})
-filtered = {k: v for k, v in servers.items() if k in requested}
+filtered = {k: dict(v) for k, v in servers.items() if k in requested}
+
+# Inietta --output-dir per il server playwright se PLAYWRIGHT_OUTPUT_DIR è settato
+output_dir = os.environ.get('PLAYWRIGHT_OUTPUT_DIR', '')
+if output_dir and 'playwright' in filtered:
+    args = list(filtered['playwright'].get('args', []))
+    # Rimuovi eventuale --output-dir precedente
+    new_args = []
+    skip_next = False
+    for a in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if a == '--output-dir':
+            skip_next = True
+            continue
+        new_args.append(a)
+    new_args.extend(['--output-dir', output_dir])
+    filtered['playwright']['args'] = new_args
 
 if filtered:
     print(json.dumps({'mcpServers': filtered}, indent=2))

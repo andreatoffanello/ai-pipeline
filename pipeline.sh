@@ -341,6 +341,7 @@ _run_pipeline() {
 
             display_box_stop
             display_file_changes "${CLAUDE_MODIFIED_FILES[@]:-}"
+            display_screenshots_saved "${PLAYWRIGHT_OUTPUT_DIR:-}"
 
             if [[ $claude_exit -eq 75 ]]; then
                 state_step_fail "$step_name" "token exhausted"
@@ -411,6 +412,7 @@ _run_pipeline() {
                         rm -f "$reject_prompt"
                         display_box_stop
                         display_file_changes "${CLAUDE_MODIFIED_FILES[@]:-}"
+                        display_screenshots_saved "${PLAYWRIGHT_OUTPUT_DIR:-}"
                         claude_setup_provider "$provider" "$model"
                     fi
                     continue
@@ -659,7 +661,8 @@ _main() {
              "${PIPELINE_DIR}/reviews" \
              "${PIPELINE_DIR}/qa" \
              "${PIPELINE_DIR}/logs" \
-             "${PIPELINE_DIR}/verdicts"
+             "${PIPELINE_DIR}/verdicts" \
+             "${PIPELINE_DIR}/screenshots"
 
     # Brief management
     if [[ -n "$PIPELINE_DESCRIPTION" ]]; then

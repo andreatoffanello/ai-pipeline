@@ -386,6 +386,28 @@ display_file_changes() {
 }
 
 # ---------------------------------------------------------------------------
+# display_screenshots_saved <dir>
+# Mostra quanti screenshot sono stati salvati nella directory.
+# ---------------------------------------------------------------------------
+display_screenshots_saved() {
+    local dir="$1"
+    [[ -z "$dir" ]] && return 0
+    [[ ! -d "$dir" ]] && return 0
+
+    local count=0
+    local files
+    files=$(find "$dir" -maxdepth 1 \( -name "*.png" -o -name "*.jpeg" -o -name "*.jpg" \) 2>/dev/null || true)
+    if [[ -n "$files" ]]; then
+        count=$(echo "$files" | wc -l | tr -d ' ')
+    fi
+
+    if [[ $count -gt 0 ]]; then
+        local rel_dir="${dir#$PIPELINE_DIR/}"
+        printf "  ${DIM}📸 %d screenshot salvati → %s${NC}\n" "$count" "$rel_dir"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # display_rejected_summary <report_file>
 # Estrae e mostra il motivo di REJECTED dal file .md del report.
 # ---------------------------------------------------------------------------

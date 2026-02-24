@@ -6,6 +6,7 @@ pipeline:
   name: thetis-pm
 
 project:
+  dev_host: localhost              # host del dev server (default localhost)
   dev_port: 9999
   dev_start: "pnpm run dev"        # o "yarn dev", "pnpm dev", ecc.
   dev_start_timeout: 30           # secondi di attesa (default 30)

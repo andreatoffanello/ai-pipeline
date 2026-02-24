@@ -2,25 +2,49 @@
 # lib/playwright.sh — verifica dev server + iniezione istruzione nei prompt
 # PIPELINE_DIR, PIPELINE_FEATURE devono essere settati dall'entry point
 
+# Directory dove vengono salvati gli screenshot Playwright per lo step corrente.
+# Settata da playwright_check_step, letta da _claude_filter_mcp per --output-dir.
+export PLAYWRIGHT_OUTPUT_DIR=""
+
 # ---------------------------------------------------------------------------
-# playwright_get_port
+# playwright_get_port / playwright_get_host
 # ---------------------------------------------------------------------------
 playwright_get_port() {
     config_get_default "project.dev_port" "3000"
 }
 
+playwright_get_host() {
+    config_get_default "project.dev_host" "localhost"
+}
+
 # ---------------------------------------------------------------------------
-# playwright_server_is_up <port>
-# Exit 0 se il server risponde, exit 1 altrimenti
+# playwright_base_url
+# Restituisce http://<host>:<port> letti da pipeline.yaml.
+# ---------------------------------------------------------------------------
+playwright_base_url() {
+    local host port
+    host=$(playwright_get_host)
+    port=$(playwright_get_port)
+    echo "http://${host}:${port}"
+}
+
+# ---------------------------------------------------------------------------
+# playwright_server_is_up
+# Exit 0 se il server risponde, exit 1 altrimenti.
 # ---------------------------------------------------------------------------
 playwright_server_is_up() {
-    local port="$1"
+    local base_url
+    base_url=$(playwright_base_url)
+    local host port
+    host=$(playwright_get_host)
+    port=$(playwright_get_port)
+
     if command -v curl &>/dev/null; then
         local code
-        code=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "http://localhost:${port}" 2>/dev/null || echo "000")
+        code=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "${base_url}" 2>/dev/null || echo "000")
         [[ "$code" != "000" ]] && return 0
     elif command -v nc &>/dev/null; then
-        nc -z localhost "$port" 2>/dev/null && return 0
+        nc -z "$host" "$port" 2>/dev/null && return 0
     fi
     return 1
 }
@@ -32,8 +56,8 @@ playwright_server_is_up() {
 # Exit 0 se il server è up, exit 1 se timeout o nessun comando configurato.
 # ---------------------------------------------------------------------------
 playwright_start_server() {
-    local port
-    port=$(playwright_get_port)
+    local base_url
+    base_url=$(playwright_base_url)
 
     local cmd
     cmd=$(config_get_default "project.dev_start" "")
@@ -59,8 +83,8 @@ playwright_start_server() {
     while [[ $i -lt $timeout ]]; do
         sleep 1
         i=$(( i + 1 ))
-        if playwright_server_is_up "$port"; then
-            display_info "Dev server attivo su :${port} dopo ${i}s"
+        if playwright_server_is_up; then
+            display_info "Dev server attivo su ${base_url} dopo ${i}s"
             return 0
         fi
         # Feedback ogni 5 secondi
@@ -79,11 +103,11 @@ playwright_start_server() {
 # se il server non risponde.
 # ---------------------------------------------------------------------------
 playwright_require_server() {
-    local port
-    port=$(playwright_get_port)
+    local base_url
+    base_url=$(playwright_base_url)
 
-    if playwright_server_is_up "$port"; then
-        display_info "Dev server attivo su :${port} — ok"
+    if playwright_server_is_up; then
+        display_info "Dev server attivo su ${base_url} — ok"
         return 0
     fi
 
@@ -93,7 +117,7 @@ playwright_require_server() {
     fi
 
     printf "\n"
-    printf "  ${RED}ERR  Dev server NON attivo su :${port}${NC}\n\n"
+    printf "  ${RED}ERR  Dev server NON attivo su ${base_url}${NC}\n\n"
     printf "  Configura project.dev_start in pipeline.yaml per l'avvio automatico,\n"
     printf "  oppure avvia il dev server manualmente e rilancia:\n\n"
     printf "  ${BOLD}    bash pipeline.sh ${PIPELINE_FEATURE:-<feature>}${NC}\n\n"
@@ -102,28 +126,57 @@ playwright_require_server() {
 }
 
 # ---------------------------------------------------------------------------
-# playwright_inject_prompt_instruction <prompt_file> <port> <has_bash>
+# playwright_setup_screenshot_dir <feature> <step>
+# Crea la directory per gli screenshot e la esporta in PLAYWRIGHT_OUTPUT_DIR.
+# ---------------------------------------------------------------------------
+playwright_setup_screenshot_dir() {
+    local feature="$1"
+    local step="$2"
+    local dir="${PIPELINE_DIR}/screenshots/${feature}/${step}"
+    mkdir -p "$dir"
+    PLAYWRIGHT_OUTPUT_DIR="$dir"
+    export PLAYWRIGHT_OUTPUT_DIR
+}
+
+# ---------------------------------------------------------------------------
+# playwright_inject_prompt_instruction <prompt_file> <base_url> <has_bash> <screenshot_dir>
 # Prepende al prompt l'istruzione obbligatoria di verifica visiva.
 # Se has_bash=true aggiunge anche la verifica curl, altrimenti solo MCP.
 # ---------------------------------------------------------------------------
 playwright_inject_prompt_instruction() {
     local prompt_file="$1"
-    local port="$2"
+    local base_url="$2"
     local has_bash="${3:-false}"
+    local screenshot_dir="${4:-}"
 
     local tmp
     tmp=$(mktemp)
+
+    # Blocco screenshot (condizionale)
+    local screenshot_block=""
+    if [[ -n "$screenshot_dir" ]]; then
+        local rel_dir="${screenshot_dir#$PIPELINE_DIR/}"
+        screenshot_block="
+## Screenshot automatici
+
+Tutti gli screenshot fatti con \`browser_take_screenshot\` vengono salvati
+automaticamente in: \`${rel_dir}/\`
+
+Puoi trovare screenshot degli step precedenti in:
+\`screenshots/${PIPELINE_FEATURE:-}/\`
+"
+    fi
 
     if [[ "$has_bash" == "true" ]]; then
         cat > "$tmp" << GATE
 # VERIFICA VISIVA OBBLIGATORIA — ESEGUI PRIMA DI QUALSIASI ALTRA COSA
 
-Il dev server è attivo su http://localhost:${port}.
+Il dev server è attivo su ${base_url}.
 
 **Devi obbligatoriamente:**
 1. Usare il tool Bash per verificare che il server risponda:
    \`\`\`
-   curl -s --max-time 5 -o /dev/null -w "%{http_code}" http://localhost:${port}
+   curl -s --max-time 5 -o /dev/null -w "%{http_code}" ${base_url}
    \`\`\`
 2. Usare il MCP Playwright (browser_navigate + browser_snapshot)
    per navigare le pagine rilevanti e osservare il risultato visivo reale nel browser.
@@ -134,7 +187,7 @@ Il dev server è attivo su http://localhost:${port}.
 - Fare solo code review statica dei file sorgente
 - Saltare la verifica nel browser
 - Scrivere "da verificare" o "non verificabile" per elementi visivi
-
+${screenshot_block}
 ---
 
 GATE
@@ -142,7 +195,7 @@ GATE
         cat > "$tmp" << GATE
 # VERIFICA VISIVA OBBLIGATORIA — ESEGUI PRIMA DI QUALSIASI ALTRA COSA
 
-Il dev server è attivo su http://localhost:${port} (verificato dalla pipeline).
+Il dev server è attivo su ${base_url} (verificato dalla pipeline).
 
 **Devi obbligatoriamente:**
 1. Usare il MCP Playwright (browser_navigate + browser_snapshot)
@@ -154,8 +207,8 @@ Il dev server è attivo su http://localhost:${port} (verificato dalla pipeline).
 - Fare solo code review statica dei file sorgente
 - Saltare la verifica nel browser
 - Scrivere "da verificare" o "non verificabile" per elementi visivi
-- Dichiarare che il server non è attivo: la pipeline ha già verificato che risponde su :${port}
-
+- Dichiarare che il server non è attivo: la pipeline ha già verificato che risponde su ${base_url}
+${screenshot_block}
 ---
 
 GATE
@@ -167,8 +220,9 @@ GATE
 
 # ---------------------------------------------------------------------------
 # playwright_check_step <step_name> <feature> <prompt_file>
-# Se lo step richiede playwright, verifica che il server sia ancora up
-# e inietta l'istruzione nel prompt. Blocca con exit 1 se server giù.
+# Se lo step richiede playwright, verifica che il server sia ancora up,
+# prepara la directory screenshot e inietta l'istruzione nel prompt.
+# Blocca con exit 1 se server giù.
 # ---------------------------------------------------------------------------
 playwright_check_step() {
     local step="$1"
@@ -179,18 +233,20 @@ playwright_check_step() {
     needs_playwright=$(config_step_needs_playwright "$step")
 
     if [[ "$needs_playwright" != "true" ]]; then
+        PLAYWRIGHT_OUTPUT_DIR=""
+        export PLAYWRIGHT_OUTPUT_DIR
         return 0
     fi
 
-    local port
-    port=$(playwright_get_port)
+    local base_url
+    base_url=$(playwright_base_url)
 
     # Reverifica che il server sia ancora attivo prima di ogni step playwright
-    if ! playwright_server_is_up "$port"; then
-        display_warn "Dev server non risponde su :${port} — tentativo di riavvio..."
+    if ! playwright_server_is_up; then
+        display_warn "Dev server non risponde su ${base_url} — tentativo di riavvio..."
         if ! playwright_start_server; then
             printf "\n"
-            printf "  ${RED}ERR  Dev server NON attivo su :${port} (step: ${step})${NC}\n\n"
+            printf "  ${RED}ERR  Dev server NON attivo su ${base_url} (step: ${step})${NC}\n\n"
             printf "  Il server si è spento durante la pipeline e il riavvio automatico è fallito.\n"
             printf "  Riavvia il dev server, poi riprendi con:\n\n"
             printf "  ${BOLD}    bash pipeline.sh ${PIPELINE_FEATURE:-<feature>} --from ${step}${NC}\n\n"
@@ -199,12 +255,15 @@ playwright_check_step() {
         fi
     fi
 
+    # Prepara directory screenshot
+    playwright_setup_screenshot_dir "$feature" "$step"
+
     local step_tools
     step_tools=$(config_step_allowed_tools "$step")
     local has_bash="false"
     [[ "$step_tools" == *"Bash"* ]] && has_bash="true"
 
-    playwright_inject_prompt_instruction "$prompt_file" "$port" "$has_bash"
-    display_info "${step}: verifica visiva Playwright iniettata nel prompt (Bash: ${has_bash})"
+    playwright_inject_prompt_instruction "$prompt_file" "$base_url" "$has_bash" "$PLAYWRIGHT_OUTPUT_DIR"
+    display_info "${step}: Playwright → ${base_url} | screenshot → screenshots/${feature}/${step}/"
     return 0
 }
