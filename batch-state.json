@@ -1,7 +1,7 @@
 {
   "mode": "batch",
-  "started_at": "2026-02-24T14:57:27Z",
-  "updated_at": "2026-02-24T14:57:27Z",
+  "started_at": "2026-02-24T15:34:16Z",
+  "updated_at": "2026-02-24T16:40:45Z",
   "total": 4,
   "completed": 0,
   "failed": 0,
@@ -9,11 +9,13 @@
   "status": "running",
   "features": {
     "fase-5-comunicazione": {
-      "status": "in_progress",
-      "started_at": "2026-02-24T14:57:27Z"
+      "status": "completed",
+      "started_at": "2026-02-24T15:34:16Z",
+      "elapsed": "66m29s"
     },
     "fase-6-roadmap": {
-      "status": "pending"
+      "status": "in_progress",
+      "started_at": "2026-02-24T16:40:45Z"
     },
     "fase-7-wiki": {
       "status": "pending"

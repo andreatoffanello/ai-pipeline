@@ -32,6 +32,9 @@ var(--color-text-white)        /* testo su sfondo scuro */
 var(--color-success)           /* #00B900 */
 var(--color-error)             /* #E00000 */
 var(--color-warning)           /* #DBB900 */
+var(--color-orange)            /* #F97316 — priorità alta, status blocked */
+var(--color-code-bg)           /* #0f0f11 — sfondo code block (tema scuro fisso, non responsivo al dark mode) */
+var(--color-code-text)         /* #e2e8f0 — testo code block (tema scuro fisso, non responsivo al dark mode) */
 ```
 
 ### Spacing (griglia 4px)
@@ -58,6 +61,9 @@ var(--text-lg)    /* 2.2rem — titoli sezione */
 var(--text-xl)    /* 3.2rem — titoli pagina */
 var(--text-2xl)   /* 4rem — hero */
 var(--text-3xl)   /* 5.6rem — hero grande */
+
+var(--font-sans)  /* Inter, system-ui, sans-serif — font principale */
+var(--font-mono)  /* JetBrains Mono, Fira Code, monospace — codice e dati numerici */
 ```
 
 ### Border Radius
