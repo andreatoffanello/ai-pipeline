@@ -3,6 +3,7 @@
 #
 # Usage:
 #   ./ai-pipeline/pipeline.sh <feature> [options]
+#   ./ai-pipeline/pipeline.sh <feat1> <feat2> ... [options]   (batch mode)
 #
 # Options:
 #   --from <step>          Riparte da uno step specifico
@@ -12,6 +13,8 @@
 #   --model <model>        Override modello per tutti gli step
 #   --app <app>            Target app/layer (es. my-app, my-lib)
 #   --description "..."    Brief inline (crea briefs/<feature>.md)
+#   --batch-file <file>    Carica feature da file (una per riga)
+#   --continue-on-error    In batch: continua anche se una feature fallisce
 #   --state                Mostra stato corrente
 #   --help                 Aiuto
 #
@@ -27,7 +30,9 @@ PIPELINE_DIR="$SCRIPT_DIR"
 PIPELINE_CONFIG_FILE="${PIPELINE_DIR}/pipeline.yaml"
 PIPELINE_STATE_FILE="${PIPELINE_DIR}/state.json"
 
-export PIPELINE_DIR PIPELINE_CONFIG_FILE PIPELINE_STATE_FILE
+PIPELINE_BATCH_STATE_FILE="${PIPELINE_DIR}/batch-state.json"
+
+export PIPELINE_DIR PIPELINE_CONFIG_FILE PIPELINE_STATE_FILE PIPELINE_BATCH_STATE_FILE
 
 # ---------------------------------------------------------------------------
 # Load libs
@@ -50,6 +55,7 @@ trap 'display_trap_cleanup; rm -f /tmp/pipeline-prompt-* /tmp/pipeline-reject-*;
 # ---------------------------------------------------------------------------
 export PIPELINE_FEATURE=""
 export APP=""
+PIPELINE_FEATURES=()
 PIPELINE_FROM_STEP=""
 PIPELINE_ONLY_STEP=""
 PIPELINE_DRY_RUN="false"
@@ -57,6 +63,8 @@ PIPELINE_RESUME="false"
 PIPELINE_MODEL_OVERRIDE=""
 PIPELINE_DESCRIPTION=""
 PIPELINE_SHOW_STATE="false"
+PIPELINE_CONTINUE_ON_ERROR="false"
+PIPELINE_BATCH_FILE=""
 
 # ---------------------------------------------------------------------------
 # _usage
@@ -65,6 +73,7 @@ _usage() {
     cat <<EOF
 
 Usage: $(basename "$0") <feature> [options]
+       $(basename "$0") <feature1> <feature2> ... [options]   (batch mode)
 
 Options:
   --from <step>          Riparte da uno step specifico
@@ -74,6 +83,8 @@ Options:
   --model <model>        Override modello per tutti gli step
   --app <app>            Target app/layer
   --description "..."    Brief inline (crea briefs/<feature>.md)
+  --batch-file <file>    Carica feature da file (una per riga)
+  --continue-on-error    In batch: continua anche se una feature fallisce
   --state                Mostra stato corrente
   --help                 Aiuto
 
@@ -84,48 +95,102 @@ Examples:
   ./pipeline.sh button-outline --only qa
   ./pipeline.sh --state
 
+  # Batch mode (esecuzione sequenziale):
+  ./pipeline.sh feat-login feat-signup feat-dashboard
+  ./pipeline.sh --batch-file features.txt
+  ./pipeline.sh feat-a feat-b --continue-on-error --model claude-sonnet-4-6
+
 EOF
 }
 
 # ---------------------------------------------------------------------------
-# _pipeline_show_state — mostra stato corrente da state.json
+# _pipeline_show_state — mostra stato corrente da state.json e batch-state.json
 # ---------------------------------------------------------------------------
 _pipeline_show_state() {
-    if [[ ! -f "$PIPELINE_STATE_FILE" ]]; then
-        display_error "Nessuna pipeline in corso (state.json non trovato)"
-        return 1
+    local found=false
+
+    # Mostra batch state se presente
+    if [[ -f "$PIPELINE_BATCH_STATE_FILE" ]]; then
+        found=true
+        _pipeline_show_batch_state
     fi
 
-    local feature started
-    feature=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('feature','?'))" \
-        "$PIPELINE_STATE_FILE" 2>/dev/null || echo "?")
-    started=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('started_at','?'))" \
-        "$PIPELINE_STATE_FILE" 2>/dev/null || echo "?")
+    # Mostra pipeline state se presente
+    if [[ -f "$PIPELINE_STATE_FILE" ]]; then
+        found=true
 
-    echo ""
-    echo "  Pipeline: ${feature}"
-    echo "  Avviata:  ${started}"
-    echo ""
+        local feature started
+        feature=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('feature','?'))" \
+            "$PIPELINE_STATE_FILE" 2>/dev/null || echo "?")
+        started=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('started_at','?'))" \
+            "$PIPELINE_STATE_FILE" 2>/dev/null || echo "?")
 
-    local all_steps
-    all_steps=$(config_steps_names)
-    while IFS= read -r show_step; do
-        local show_status
-        show_status=$(python3 -c "
+        echo ""
+        echo "  Pipeline (ultimo run): ${feature}"
+        echo "  Avviata:  ${started}"
+        echo ""
+
+        local all_steps
+        all_steps=$(config_steps_names)
+        while IFS= read -r show_step; do
+            local show_status
+            show_status=$(python3 -c "
 import json,sys
 d=json.load(open(sys.argv[1]))
 s=d.get('steps',{}).get(sys.argv[2],{})
 print(s.get('status','pending'))
 " "$PIPELINE_STATE_FILE" "$show_step" 2>/dev/null || echo "pending")
 
-        case "$show_status" in
-            completed)   display_step_done "$show_step" "completato" "" ;;
-            in_progress) printf "  ${CYAN}⠸${NC}  %-14s %s\n" "$show_step" "${CYAN}in corso${NC}" ;;
-            failed)      printf "  ${RED}x${NC}  %-14s %s\n" "$show_step" "${RED}fallito${NC}" ;;
-            *)           display_step_waiting "$show_step" ;;
-        esac
-    done <<< "$all_steps"
-    echo ""
+            case "$show_status" in
+                completed)   display_step_done "$show_step" "completato" "" ;;
+                in_progress) printf "  ${CYAN}⠸${NC}  %-14s %s\n" "$show_step" "${CYAN}in corso${NC}" ;;
+                failed)      printf "  ${RED}x${NC}  %-14s %s\n" "$show_step" "${RED}fallito${NC}" ;;
+                *)           display_step_waiting "$show_step" ;;
+            esac
+        done <<< "$all_steps"
+        echo ""
+    fi
+
+    if [[ "$found" == "false" ]]; then
+        display_error "Nessuna pipeline in corso (state.json non trovato)"
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# _pipeline_show_batch_state — mostra stato batch da batch-state.json
+# ---------------------------------------------------------------------------
+_pipeline_show_batch_state() {
+    [[ ! -f "$PIPELINE_BATCH_STATE_FILE" ]] && return
+
+    python3 - "$PIPELINE_BATCH_STATE_FILE" <<'PYEOF'
+import sys, json
+
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+
+status = data.get("status", "?")
+started = data.get("started_at", "?")
+total = data.get("total", 0)
+completed = data.get("completed", 0)
+failed = data.get("failed", 0)
+
+status_icon = {"running": "⠸", "completed": "v", "failed": "x", "interrupted": "!"}.get(status, "?")
+
+print()
+print(f"  Batch: {status_icon} {status}  ({completed}/{total} completate, {failed} fallite)")
+print(f"  Avviato: {started}")
+print()
+
+for name, info in data.get("features", {}).items():
+    s = info.get("status", "pending")
+    elapsed = info.get("elapsed", "")
+    icon = {"completed": "v", "failed": "x", "in_progress": "*", "skipped": "-", "pending": "o"}.get(s, "?")
+    elapsed_str = f"  {elapsed}" if elapsed else ""
+    print(f"  {icon}  {name:<30} {s}{elapsed_str}")
+
+print()
+PYEOF
 }
 
 # ---------------------------------------------------------------------------
@@ -388,30 +453,158 @@ _run_pipeline() {
 }
 
 # ---------------------------------------------------------------------------
+# _run_batch — esecuzione sequenziale di più feature
+# Ogni feature viene eseguita in una subshell per isolare eventuali exit.
+# ---------------------------------------------------------------------------
+_run_batch() {
+    local features=("${PIPELINE_FEATURES[@]}")
+    local total=${#features[@]}
+
+    # Genera JSON array dei nomi per batch_state_init
+    local features_json="["
+    local first=true
+    for f in "${features[@]}"; do
+        if [[ "$first" == "true" ]]; then
+            features_json+="\"${f}\""
+            first=false
+        else
+            features_json+=",\"${f}\""
+        fi
+    done
+    features_json+="]"
+
+    display_batch_header "$total" "${features[@]}"
+    batch_state_init "$features_json"
+
+    local completed_features=()
+    local failed_features=()
+    local skipped_features=()
+    local batch_start
+    batch_start=$(date +%s)
+
+    for i in "${!features[@]}"; do
+        local feature="${features[$i]}"
+        local idx=$(( i + 1 ))
+
+        PIPELINE_FEATURE="$feature"
+        export PIPELINE_FEATURE
+
+        # Verifica che il brief esista
+        local brief_file="${PIPELINE_DIR}/briefs/${feature}.md"
+        if [[ ! -f "$brief_file" ]]; then
+            display_warn "Brief non trovato per '${feature}' — skip"
+            skipped_features+=("$feature")
+            batch_state_feature_skip "$feature"
+            continue
+        fi
+
+        display_batch_feature_start "$feature" "$idx" "$total"
+        batch_state_feature_start "$feature"
+
+        local feature_start
+        feature_start=$(date +%s)
+
+        # Esegui pipeline in subshell per isolare exit
+        local exit_code=0
+        ( _run_pipeline ) || exit_code=$?
+
+        local feature_end feature_elapsed_s feature_elapsed_str
+        feature_end=$(date +%s)
+        feature_elapsed_s=$(( feature_end - feature_start ))
+        feature_elapsed_str=$(printf "%dm%02ds" $(( feature_elapsed_s / 60 )) $(( feature_elapsed_s % 60 )))
+
+        if [[ $exit_code -eq 0 ]]; then
+            completed_features+=("$feature")
+            batch_state_feature_done "$feature" "$feature_elapsed_str"
+            display_batch_feature_result "$feature" "completed" "$feature_elapsed_str" "$idx" "$total"
+        else
+            failed_features+=("$feature")
+            batch_state_feature_fail "$feature" "$exit_code"
+            display_batch_feature_result "$feature" "failed" "$feature_elapsed_str" "$idx" "$total"
+
+            if [[ "$PIPELINE_CONTINUE_ON_ERROR" != "true" ]]; then
+                # Marca le rimanenti come skipped
+                local j
+                for (( j = i + 1; j < total; j++ )); do
+                    skipped_features+=("${features[$j]}")
+                    batch_state_feature_skip "${features[$j]}"
+                done
+                break
+            fi
+        fi
+    done
+
+    local batch_end batch_elapsed_s batch_elapsed_str
+    batch_end=$(date +%s)
+    batch_elapsed_s=$(( batch_end - batch_start ))
+    batch_elapsed_str=$(printf "%dm%02ds" $(( batch_elapsed_s / 60 )) $(( batch_elapsed_s % 60 )))
+
+    # Determina stato finale
+    local final_status="completed"
+    [[ ${#failed_features[@]} -gt 0 ]] && final_status="failed"
+    [[ ${#skipped_features[@]} -gt 0 ]] && [[ ${#failed_features[@]} -eq 0 ]] && final_status="completed"
+
+    batch_state_done "$final_status"
+
+    # Componi dettagli per il summary
+    local detail_lines=()
+    for f in "${completed_features[@]}"; do
+        detail_lines+=("v  ${f}")
+    done
+    for f in "${failed_features[@]}"; do
+        detail_lines+=("x  ${f}")
+    done
+    for f in "${skipped_features[@]}"; do
+        detail_lines+=("-  ${f} (skip)")
+    done
+
+    display_batch_summary "$total" "${#completed_features[@]}" "${#failed_features[@]}" \
+        "${#skipped_features[@]}" "$batch_elapsed_str" "${detail_lines[@]}"
+
+    [[ ${#failed_features[@]} -gt 0 ]] && exit 1
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
 # _main — CLI parsing + validation + avvio
 # ---------------------------------------------------------------------------
 _main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --from)        PIPELINE_FROM_STEP="$2"; shift 2 ;;
-            --only)        PIPELINE_ONLY_STEP="$2"; shift 2 ;;
-            --resume)      PIPELINE_RESUME="true"; shift ;;
-            --dry-run)     PIPELINE_DRY_RUN="true"; shift ;;
-            --model)       PIPELINE_MODEL_OVERRIDE="$2"; shift 2 ;;
-            --app)         APP="$2"; shift 2 ;;
-            --description) PIPELINE_DESCRIPTION="$2"; shift 2 ;;
-            --state)       PIPELINE_SHOW_STATE="true"; shift ;;
-            --help|-h)     _usage; exit 0 ;;
-            -*)            display_error "Opzione sconosciuta: $1"; _usage; exit 1 ;;
-            *)
-                if [[ -z "$PIPELINE_FEATURE" ]]; then
-                    PIPELINE_FEATURE="$1"
-                else
-                    display_error "Feature già specificata: ${PIPELINE_FEATURE}"; exit 1
-                fi
-                shift ;;
+            --from)              PIPELINE_FROM_STEP="$2"; shift 2 ;;
+            --only)              PIPELINE_ONLY_STEP="$2"; shift 2 ;;
+            --resume)            PIPELINE_RESUME="true"; shift ;;
+            --dry-run)           PIPELINE_DRY_RUN="true"; shift ;;
+            --model)             PIPELINE_MODEL_OVERRIDE="$2"; shift 2 ;;
+            --app)               APP="$2"; shift 2 ;;
+            --description)       PIPELINE_DESCRIPTION="$2"; shift 2 ;;
+            --batch-file)        PIPELINE_BATCH_FILE="$2"; shift 2 ;;
+            --continue-on-error) PIPELINE_CONTINUE_ON_ERROR="true"; shift ;;
+            --state)             PIPELINE_SHOW_STATE="true"; shift ;;
+            --help|-h)           _usage; exit 0 ;;
+            -*)                  display_error "Opzione sconosciuta: $1"; _usage; exit 1 ;;
+            *)                   PIPELINE_FEATURES+=("$1"); shift ;;
         esac
     done
+
+    # Carica feature da batch file se specificato
+    if [[ -n "$PIPELINE_BATCH_FILE" ]]; then
+        if [[ ! -f "$PIPELINE_BATCH_FILE" ]]; then
+            display_error "Batch file non trovato: ${PIPELINE_BATCH_FILE}"
+            exit 1
+        fi
+        while IFS= read -r _line; do
+            _line="${_line%%#*}"                       # strip commenti
+            _line=$(echo "$_line" | xargs 2>/dev/null) # strip whitespace
+            [[ -z "$_line" ]] && continue
+            PIPELINE_FEATURES+=("$_line")
+        done < "$PIPELINE_BATCH_FILE"
+    fi
+
+    # Imposta PIPELINE_FEATURE per single-feature (backward compat)
+    if [[ ${#PIPELINE_FEATURES[@]} -eq 1 ]]; then
+        PIPELINE_FEATURE="${PIPELINE_FEATURES[0]}"
+    fi
 
     export PIPELINE_FEATURE APP
 
@@ -421,9 +614,15 @@ _main() {
         exit 0
     fi
 
-    if [[ -z "$PIPELINE_FEATURE" ]]; then
+    if [[ ${#PIPELINE_FEATURES[@]} -eq 0 ]]; then
         display_error "Feature name richiesta"
         _usage
+        exit 1
+    fi
+
+    # Validazione: --description incompatibile con batch mode
+    if [[ -n "$PIPELINE_DESCRIPTION" ]] && [[ ${#PIPELINE_FEATURES[@]} -gt 1 ]]; then
+        display_error "--description non è compatibile con batch mode. Crea i file brief prima."
         exit 1
     fi
 
@@ -490,24 +689,46 @@ _main() {
         fi
     fi
 
-    # --resume: trova il primo step incompleto
-    if [[ "$PIPELINE_RESUME" == "true" ]] && [[ -z "$PIPELINE_FROM_STEP" ]]; then
-        display_info "Rilevamento step completati..."
-        local all_steps_resume
-        all_steps_resume=$(config_steps_names)
-        while IFS= read -r resume_step; do
-            local resume_output
-            resume_output=$(config_step_get "$resume_step" "output")
-            resume_output="${resume_output//\$\{FEATURE\}/$PIPELINE_FEATURE}"
-            if [[ -n "$resume_output" ]] && [[ ! -f "${PIPELINE_DIR}/${resume_output}" ]]; then
-                PIPELINE_FROM_STEP="$resume_step"
-                display_info "Resume da: ${resume_step}"
-                break
+    # =========================================================================
+    # Dispatch: batch mode vs single feature
+    # =========================================================================
+    if [[ ${#PIPELINE_FEATURES[@]} -gt 1 ]]; then
+        # ----- BATCH MODE -----
+        # Valida che tutti i brief esistano (avvisa ma non blocca)
+        local _missing_briefs=0
+        for _bf in "${PIPELINE_FEATURES[@]}"; do
+            if [[ ! -f "${PIPELINE_DIR}/briefs/${_bf}.md" ]]; then
+                display_warn "Brief mancante: briefs/${_bf}.md — sarà saltata"
+                _missing_briefs=$(( _missing_briefs + 1 ))
             fi
-        done <<< "$all_steps_resume"
-    fi
+        done
+        if [[ $_missing_briefs -eq ${#PIPELINE_FEATURES[@]} ]]; then
+            display_error "Nessun brief trovato per le feature specificate."
+            exit 1
+        fi
 
-    _run_pipeline
+        _run_batch
+    else
+        # ----- SINGLE FEATURE MODE -----
+        # --resume: trova il primo step incompleto
+        if [[ "$PIPELINE_RESUME" == "true" ]] && [[ -z "$PIPELINE_FROM_STEP" ]]; then
+            display_info "Rilevamento step completati..."
+            local all_steps_resume
+            all_steps_resume=$(config_steps_names)
+            while IFS= read -r resume_step; do
+                local resume_output
+                resume_output=$(config_step_get "$resume_step" "output")
+                resume_output="${resume_output//\$\{FEATURE\}/$PIPELINE_FEATURE}"
+                if [[ -n "$resume_output" ]] && [[ ! -f "${PIPELINE_DIR}/${resume_output}" ]]; then
+                    PIPELINE_FROM_STEP="$resume_step"
+                    display_info "Resume da: ${resume_step}"
+                    break
+                fi
+            done <<< "$all_steps_resume"
+        fi
+
+        _run_pipeline
+    fi
 }
 
 # ---------------------------------------------------------------------------

@@ -530,6 +530,119 @@ display_info() {
     printf "  ${DIM}>>  %s${NC}\n" "$1"
 }
 
+# ===========================================================================
+# Batch display functions
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# display_batch_header <total> <feature1> [feature2 ...]
+# ---------------------------------------------------------------------------
+display_batch_header() {
+    local total="$1"
+    shift
+    local features=("$@")
+    local started
+    started=$(date "+%Y-%m-%d %H:%M:%S")
+
+    printf "\n"
+    printf "  ${BOLD}${MAGENTA}+----------------------------------------------------------+${NC}\n"
+    printf "  ${MAGENTA}|${NC}  ${BOLD}BATCH MODE${NC}  ${DIM}%d feature in coda${NC}%*s${MAGENTA}|${NC}\n" \
+        "$total" $(( 32 - ${#total} )) ""
+    printf "  ${MAGENTA}|${NC}  ${DIM}Avviato: %-49s${NC}${MAGENTA}|${NC}\n" "$started"
+    printf "  ${MAGENTA}|${NC}%*s${MAGENTA}|${NC}\n" 58 ""
+    local idx=0
+    for f in "${features[@]}"; do
+        idx=$(( idx + 1 ))
+        printf "  ${MAGENTA}|${NC}  ${DIM}%2d.${NC} %-54s${MAGENTA}|${NC}\n" "$idx" "$f"
+    done
+    printf "  ${BOLD}${MAGENTA}+----------------------------------------------------------+${NC}\n"
+    printf "\n"
+}
+
+# ---------------------------------------------------------------------------
+# display_batch_feature_start <feature> <idx> <total>
+# ---------------------------------------------------------------------------
+display_batch_feature_start() {
+    local feature="$1"
+    local idx="$2"
+    local total="$3"
+
+    printf "\n"
+    printf "  ${BOLD}${MAGENTA}===========================================================${NC}\n"
+    printf "  ${MAGENTA}>>${NC}  ${BOLD}Feature %d/%d: %s${NC}\n" "$idx" "$total" "$feature"
+    printf "  ${BOLD}${MAGENTA}===========================================================${NC}\n"
+}
+
+# ---------------------------------------------------------------------------
+# display_batch_feature_result <feature> <status> <elapsed> <idx> <total>
+# ---------------------------------------------------------------------------
+display_batch_feature_result() {
+    local feature="$1"
+    local status="$2"
+    local elapsed="$3"
+    local idx="$4"
+    local total="$5"
+
+    if [[ "$status" == "completed" ]]; then
+        printf "\n  ${GREEN}${BOLD}v${NC}  Feature ${BOLD}%s${NC} completata  ${DIM}%s${NC}  ${DIM}(%d/%d)${NC}\n" \
+            "$feature" "$elapsed" "$idx" "$total"
+    else
+        printf "\n  ${RED}${BOLD}x${NC}  Feature ${BOLD}%s${NC} fallita  ${DIM}%s${NC}  ${DIM}(%d/%d)${NC}\n" \
+            "$feature" "$elapsed" "$idx" "$total"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# display_batch_summary <total> <completed> <failed> <skipped> <elapsed> [detail...]
+# ---------------------------------------------------------------------------
+display_batch_summary() {
+    local total="$1"
+    local completed="$2"
+    local failed="$3"
+    local skipped="$4"
+    local elapsed="$5"
+    shift 5
+    local details=("$@")
+
+    local status_color="$GREEN"
+    local status_text="COMPLETATO"
+    if [[ $failed -gt 0 ]]; then
+        status_color="$RED"
+        status_text="CON ERRORI"
+    elif [[ $skipped -gt 0 ]]; then
+        status_color="$YELLOW"
+        status_text="PARZIALE"
+    fi
+
+    printf "\n"
+    printf "  ${BOLD}${status_color}+----------------------------------------------------------+${NC}\n"
+    printf "  ${status_color}|${NC}  ${BOLD}Batch %s${NC}  ${DIM}%s${NC}%*s${status_color}|${NC}\n" \
+        "$status_text" "$elapsed" $(( 36 - ${#status_text} - ${#elapsed} )) ""
+    printf "  ${status_color}|${NC}%*s${status_color}|${NC}\n" 58 ""
+    printf "  ${status_color}|${NC}  Totale: ${BOLD}%d${NC}" "$total"
+    printf "  ${GREEN}OK: %d${NC}" "$completed"
+    printf "  ${RED}Err: %d${NC}" "$failed"
+    printf "  ${DIM}Skip: %d${NC}" "$skipped"
+    local stats_len=$(( 16 + ${#total} + ${#completed} + ${#failed} + ${#skipped} ))
+    printf "%*s${status_color}|${NC}\n" $(( 58 - stats_len )) ""
+
+    if [[ ${#details[@]} -gt 0 ]]; then
+        printf "  ${status_color}|${NC}%*s${status_color}|${NC}\n" 58 ""
+        for d in "${details[@]}"; do
+            printf "  ${status_color}|${NC}  %-56s${status_color}|${NC}\n" "${d:0:56}"
+        done
+    fi
+
+    printf "  ${BOLD}${status_color}+----------------------------------------------------------+${NC}\n"
+    printf "\n"
+
+    if [[ $failed -gt 0 ]]; then
+        _notify "Batch Terminato" "${completed}/${total} completate, ${failed} fallite" "batch"
+    else
+        _notify "Batch Completato" "Tutte ${total} feature completate in ${elapsed}" "batch"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Trap handler — ferma spinner su INT/TERM
 # ---------------------------------------------------------------------------
