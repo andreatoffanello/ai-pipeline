@@ -8,6 +8,10 @@ CLAUDE_TOKEN_BASE_DELAY="${CLAUDE_TOKEN_BASE_DELAY:-60}"
 # Array globale file modificati — popolato da claude_run
 CLAUDE_MODIFIED_FILES=()
 
+# Token usage dell'ultima esecuzione — popolato da claude_run
+CLAUDE_LAST_INPUT_TOKENS=0
+CLAUDE_LAST_OUTPUT_TOKENS=0
+
 # ---------------------------------------------------------------------------
 # claude_setup_provider <provider_name> <model>
 # Configura le env vars per il provider specificato.
@@ -153,6 +157,18 @@ claude_run() {
         break
     done
 
+    # Estrai token usage dal log stream-json
+    CLAUDE_LAST_INPUT_TOKENS=0
+    CLAUDE_LAST_OUTPUT_TOKENS=0
+    if [[ -f "$log_file" ]]; then
+        local usage
+        usage=$(_claude_parse_token_usage "$log_file")
+        if [[ -n "$usage" ]]; then
+            CLAUDE_LAST_INPUT_TOKENS="${usage%%|*}"
+            CLAUDE_LAST_OUTPUT_TOKENS="${usage##*|}"
+        fi
+    fi
+
     # Deduplicazione file modificati → array globale
     if [[ -f "$files_tmp" ]]; then
         local seen=()
@@ -182,7 +198,8 @@ _claude_is_token_exhausted() {
     [[ $exit_code -eq 75 ]] && return 0
 
     if [[ -f "$stderr_file" ]]; then
-        grep -qiE 'rate.?limit|over.?capacity|token|context.?length|overloaded' \
+        # Pattern specifici per evitare false positive (es. codice che gestisce JWT token)
+        grep -qiE 'rate.?limit(ed)?|over.?capacity|context.?(window|length).?(exceed|limit)|model.?overloaded|too.?many.?tokens|token.?limit|quota.?exceed' \
             "$stderr_file" 2>/dev/null && return 0
     fi
 
@@ -298,6 +315,42 @@ else:
 
 print(f'{tool_name}  {arg}')
 " 2>/dev/null <<< "$line" || true
+}
+
+_claude_parse_token_usage() {
+    local log_file="$1"
+    # Cerca l'ultima riga con "result" type che contiene usage info
+    python3 - "$log_file" <<'PYEOF'
+import sys, json
+
+path = sys.argv[1]
+input_tokens = 0
+output_tokens = 0
+
+try:
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except:
+                continue
+            # Format: {"type":"result",...,"usage":{"input_tokens":X,"output_tokens":Y}}
+            usage = d.get("usage", {})
+            if isinstance(usage, dict):
+                it = usage.get("input_tokens", 0)
+                ot = usage.get("output_tokens", 0)
+                if it > 0 or ot > 0:
+                    input_tokens += it
+                    output_tokens += ot
+except:
+    pass
+
+if input_tokens > 0 or output_tokens > 0:
+    print(f"{input_tokens}|{output_tokens}")
+PYEOF
 }
 
 _claude_filter_mcp() {

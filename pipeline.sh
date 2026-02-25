@@ -44,6 +44,8 @@ source "${PIPELINE_DIR}/lib/verdict.sh"
 source "${PIPELINE_DIR}/lib/claude.sh"
 source "${PIPELINE_DIR}/lib/prompt.sh"
 source "${PIPELINE_DIR}/lib/playwright.sh"
+source "${PIPELINE_DIR}/lib/verify.sh"
+source "${PIPELINE_DIR}/lib/context.sh"
 
 # ---------------------------------------------------------------------------
 # Trap
@@ -194,6 +196,76 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
+# _integration_enabled — true se integration check è abilitato
+# ---------------------------------------------------------------------------
+_integration_enabled() {
+    local val
+    val=$(config_get_default "integration.enabled" "false")
+    [[ "$val" == "true" ]]
+}
+
+# ---------------------------------------------------------------------------
+# _integration_run <log_file>
+# Esegue i comandi di integration check. Return 0 se tutti passano.
+# ---------------------------------------------------------------------------
+_integration_run() {
+    local log_file="$1"
+    local project_dir
+    project_dir="$(dirname "$PIPELINE_DIR")"
+    > "$log_file"
+
+    local all_passed=true
+
+    # Parsing semplice: legge le righe sotto integration.commands
+    local commands
+    commands=$(python3 - "$PIPELINE_CONFIG_FILE" <<'PYEOF'
+import sys
+
+with open(sys.argv[1]) as f:
+    lines = f.readlines()
+
+in_integration = False
+in_commands = False
+
+for line in lines:
+    stripped = line.strip()
+    if stripped == 'integration:':
+        in_integration = True
+        continue
+    if not in_integration:
+        continue
+    if stripped and not line.startswith(' ') and not line.startswith('\t'):
+        break
+    if stripped == 'commands:':
+        in_commands = True
+        continue
+    if in_commands:
+        if stripped.startswith('- '):
+            cmd = stripped[2:].strip().strip('"\'')
+            if cmd:
+                print(cmd)
+        elif stripped and not stripped.startswith('#'):
+            break
+PYEOF
+)
+
+    while IFS= read -r cmd; do
+        [[ -z "$cmd" ]] && continue
+        display_info "Integration: ${cmd}"
+        local cmd_exit=0
+        local cmd_output
+        cmd_output=$(cd "$project_dir" && eval "$cmd" 2>&1) || cmd_exit=$?
+        if [[ $cmd_exit -ne 0 ]]; then
+            all_passed=false
+            printf "=== INTEGRATION FAILED: %s (exit %d) ===\n%s\n\n" "$cmd" "$cmd_exit" "$cmd_output" >> "$log_file"
+            display_warn "Integration: ${cmd} FAILED"
+        fi
+    done <<< "$commands"
+
+    [[ "$all_passed" == "true" ]]
+}
+
+# ---------------------------------------------------------------------------
 # _run_pipeline — orchestration loop
 # ---------------------------------------------------------------------------
 _run_pipeline() {
@@ -229,6 +301,7 @@ _run_pipeline() {
 
     state_init "$PIPELINE_FEATURE"
     verdict_ensure_dir
+    context_init "$PIPELINE_FEATURE"
 
     local pipeline_start
     pipeline_start=$(date +%s)
@@ -286,6 +359,17 @@ _run_pipeline() {
         step_ok="false"
 
         while true; do
+            # Model escalation on retry
+            if [[ $retries -gt 0 ]]; then
+                local retry_model
+                retry_model=$(config_step_get_default "$step_name" "model_on_retry" "")
+                if [[ -n "$retry_model" ]] && [[ "$retry_model" != "$model" ]]; then
+                    model="$retry_model"
+                    claude_setup_provider "$provider" "$model"
+                    display_info "Model escalation per retry: ${model}"
+                fi
+            fi
+
             # Costruisci prompt
             local final_prompt
             final_prompt=$(mktemp /tmp/pipeline-prompt-XXXXXX)
@@ -312,11 +396,22 @@ _run_pipeline() {
                 verdict_clear "$PIPELINE_FEATURE" "$step_name"
             fi
 
-            # Dry-run: mostra prompt e continua
+            # Dry-run: mostra prompt con sommario strutturato
             if [[ "$PIPELINE_DRY_RUN" == "true" ]]; then
+                local word_count
+                word_count=$(wc -w < "$final_prompt" 2>/dev/null | tr -d ' ' || echo "?")
                 echo ""
-                echo "  [DRY-RUN] Step: ${step_name} | Model: ${model} | Provider: ${provider}"
-                echo "  --- PROMPT ---"
+                printf "  ${BOLD}${CYAN}[DRY-RUN]${NC} Step: ${BOLD}%s${NC} | Model: %s | Provider: %s\n" \
+                    "$step_name" "$model" "$provider"
+                printf "  ${DIM}Prompt: %s parole${NC}\n" "$word_count"
+                echo ""
+                # Mostra sezioni del prompt (header markdown)
+                printf "  ${DIM}Sezioni:${NC}\n"
+                grep -E '^#{1,3} ' "$final_prompt" 2>/dev/null | while IFS= read -r header; do
+                    printf "  ${DIM}  %s${NC}\n" "$header"
+                done
+                echo ""
+                echo "  --- PROMPT COMPLETO (${word_count} parole) ---"
                 cat "$final_prompt"
                 echo "  --- END ---"
                 rm -f "$final_prompt"
@@ -360,8 +455,32 @@ _run_pipeline() {
                     display_error "Step ${step_name} fallito dopo ${max_retries} tentativi"
                     exit 1
                 fi
-                display_warn "Step fallito (exit ${claude_exit}) — retry ${retries}/${max_retries}"
+                display_retry_banner "$step_name" "$retries" "$max_retries" "exit ${claude_exit}"
                 continue
+            fi
+
+            # Verify: build/lint/test dopo step dev/dev-fix
+            if verify_step_needed "$step_name"; then
+                if ! verify_run "$step_name" "$PIPELINE_FEATURE"; then
+                    retries=$(( retries + 1 ))
+                    if [[ $retries -gt $max_retries ]]; then
+                        display_step_done "$step_name" "FAILED" "$elapsed_str"
+                        state_step_fail "$step_name" "verify fallito dopo ${max_retries} tentativi"
+                        display_error "Verify fallito per step ${step_name} dopo ${max_retries} tentativi"
+                        exit 1
+                    fi
+                    local verify_errors
+                    verify_errors=$(verify_get_errors "$PIPELINE_FEATURE" "$step_name")
+                    display_retry_banner "$step_name" "$retries" "$max_retries" "verify failed"
+                    extra_ctx="ERRORI DI BUILD/LINT/TEST — correggili prima di procedere:
+---
+${verify_errors}
+---
+
+Leggi attentamente gli errori sopra. Correggi SOLO i file che causano questi errori.
+NON riscrivere file da zero. Usa Edit per modifiche mirate."
+                    continue
+                fi
             fi
 
             # Controlla verdict se richiesto
@@ -431,6 +550,9 @@ _run_pipeline() {
             step_end_final=$(date +%s)
             state_step_done "$step_name" $(( step_end_final - step_start )) "$retries"
             completed_steps+=("$step_name")
+            # Aggiorna contesto cross-step
+            context_add_step "$PIPELINE_FEATURE" "$step_name"
+            context_add_files "$PIPELINE_FEATURE" "${CLAUDE_MODIFIED_FILES[@]:-}"
         fi
 
     done <<< "$all_steps"
@@ -452,6 +574,18 @@ _run_pipeline() {
             output_files+=("${completed_step}: ${step_out}")
         fi
     done
+
+    # Integration check finale (non-AI)
+    if _integration_enabled; then
+        display_info "Integration check finale..."
+        local int_log="${PIPELINE_DIR}/verify/${PIPELINE_FEATURE}-integration.log"
+        if _integration_run "$int_log"; then
+            display_info "Integration check: PASSED"
+        else
+            display_warn "Integration check: FAILED — vedi ${int_log}"
+            output_files+=("integration: FAILED (${int_log})")
+        fi
+    fi
 
     display_success "$PIPELINE_FEATURE" "$total_str" "${output_files[@]}"
 }
@@ -664,7 +798,9 @@ _main() {
              "${PIPELINE_DIR}/qa" \
              "${PIPELINE_DIR}/logs" \
              "${PIPELINE_DIR}/verdicts" \
-             "${PIPELINE_DIR}/screenshots"
+             "${PIPELINE_DIR}/screenshots" \
+             "${PIPELINE_DIR}/verify" \
+             "${PIPELINE_DIR}/context"
 
     # Brief management
     if [[ -n "$PIPELINE_DESCRIPTION" ]]; then

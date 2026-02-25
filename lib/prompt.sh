@@ -104,8 +104,9 @@ ISTRUZIONI OBBLIGATORIE PER LA RI-VALIDAZIONE:
 1. Leggi il file aggiornato — non fare affidamento sulla memoria di round precedenti
 2. Per ogni REV elencata sopra, cerca nella spec/implementazione la correzione corrispondente
 3. Marca esplicitamente ogni REV come "RESOLVED ✓" o "OPEN ✗" con motivazione
-4. NON aggiungere nuove revisioni che non erano presenti nel round precedente
-5. Il verdetto è binario: anche una sola REV OPEN → REJECTED. Tutte RESOLVED → APPROVED
+4. Se la correzione ha introdotto NUOVI problemi (non preesistenti), segnalali come NEW-001, NEW-002, ecc.
+   Segnala solo problemi effettivamente introdotti dalla correzione, non problemi che c'erano già prima.
+5. Verdetto binario: tutte le REV RESOLVED e zero NEW → APPROVED. Altrimenti → REJECTED
 EOF
 }
 
@@ -182,6 +183,13 @@ prompt_build() {
     fi
     full_prompt+=""$'\n'
 
+    # Contesto cross-step (se esiste)
+    local ctx_file="${PIPELINE_DIR}/context/${feature}.json"
+    if [[ -f "$ctx_file" ]]; then
+        full_prompt+="File di contesto della feature: ${ctx_file}"$'\n'
+        full_prompt+="Leggilo per sapere quali file sono stati creati/modificati dagli step precedenti."$'\n'$'\n'
+    fi
+
     # Brief per step pm
     if [[ "$step" == "pm" ]]; then
         local brief
@@ -196,9 +204,10 @@ prompt_build() {
     # extra_context: feedback revisione o ri-validazione
     if [[ -n "$extra_context" ]]; then
         if [[ "$step" == "pm" || "$step" == "dev" || "$step" == "dev-fix" ]]; then
-            full_prompt+="IMPORTANTE: QUESTA È UNA CORREZIONE, NON UNA NUOVA IMPLEMENTAZIONE."$'\n'
-            full_prompt+="Leggi il file esistente, applica le correzioni indicate nel feedback, riscrivi il file aggiornato nello stesso percorso."$'\n'
-            full_prompt+="NON riscrivere da zero. Modifica solo le sezioni indicate nel feedback."$'\n'$'\n'
+            full_prompt+="IMPORTANTE: QUESTA È UNA CORREZIONE INCREMENTALE, NON UNA NUOVA IMPLEMENTAZIONE."$'\n'
+            full_prompt+="Il file/implementazione attuale è già stato prodotto. NON ri-esplorare il codebase da zero."$'\n'
+            full_prompt+="NON riscrivere file da zero. Usa il tool Edit per modifiche mirate alle sezioni indicate nel feedback."$'\n'
+            full_prompt+="Leggi prima il file corrente, poi applica SOLO le modifiche necessarie."$'\n'$'\n'
             full_prompt+="FEEDBACK DALLA REVISIONE:"$'\n'
             full_prompt+="---"$'\n'
             full_prompt+="${extra_context}"$'\n'

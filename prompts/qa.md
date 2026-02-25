@@ -47,4 +47,17 @@ Per ogni criterio di accettazione documenta:
 - **Qualità visiva**: PASS/FAIL con motivazione (spaziatura, hover, transizioni)
 - **Note**: se FAIL, descrizione esatta del problema
 
+## In caso di ri-validazione (retry dopo DEV-FIX)
+
+Se questa è una ri-validazione dopo una correzione DEV-FIX:
+
+**ATTENZIONE**: anche se il retry è per correggere problemi specifici, devi comunque
+ri-testare TUTTI i criteri di accettazione, non solo quelli falliti.
+Il DEV-FIX potrebbe aver introdotto regressioni in parti che prima funzionavano.
+Non dare per scontato che ciò che funzionava prima funzioni ancora.
+
+Per ogni criterio ri-testato, indica esplicitamente nel report:
+- `[RE-TEST]` se era già PASS e stai verificando che non sia regredito
+- `[FIX-VERIFY]` se era FAIL e stai verificando la correzione
+
 (La gate instruction con le istruzioni per il verdict verrà aggiunta automaticamente dalla pipeline)

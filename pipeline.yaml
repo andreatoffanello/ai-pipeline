@@ -53,6 +53,7 @@ steps:
     prompt_section: "DEV (Developer)"
     provider: anthropic
     model: claude-sonnet-4-6
+    model_on_retry: claude-opus-4-6
     allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
     mcp_servers:
       - playwright
@@ -106,6 +107,26 @@ steps:
     output: ""
     verdict: false
     playwright: true
+
+verify:
+  enabled: true
+  commands:
+    - name: lint
+      cmd: "pnpm lint --no-fix"
+    - name: build
+      cmd: "pnpm build"
+  after_steps:
+    - dev
+    - dev-fix
+
+integration:
+  enabled: true
+  commands:
+    - "pnpm lint --no-fix"
+    - "pnpm build"
+
+notifications:
+  webhook_url: ""
 
 providers:
   anthropic:

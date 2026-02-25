@@ -26,6 +26,23 @@ Leggi questi file nell'ordine indicato. Non saltarne nessuno.
    `browser_take_screenshot` per vedere il risultato visivo reale. Se trovi
    problemi estetici, correggili prima di dichiarare l'implementazione completa.
 
+## Dopo l'implementazione — OBBLIGATORIO
+
+Prima di dichiarare l'implementazione completa, esegui queste verifiche nell'ordine:
+
+1. **Esegui il lint**: `pnpm lint --no-fix`
+   - Se fallisce: correggi le violazioni segnalate
+2. **Esegui il build**: `pnpm build`
+   - Se fallisce: correggi errori di import, sintassi, moduli mancanti
+3. **Esegui i test esistenti**: `pnpm test --run` (se il progetto ha test configurati)
+   - Se falliscono test che non hai toccato → hai rotto qualcosa, correggi
+   - Se falliscono test della feature → correggi l'implementazione
+4. **Verifica visivamente** con Playwright: come indicato nelle istruzioni sopra
+
+La pipeline eseguirà automaticamente lint e build dopo questo step.
+Se non passano, il tuo lavoro verrà scartato e dovrai correggere.
+Meglio trovare e risolvere i problemi adesso.
+
 ## Vincoli non negoziabili
 
 - Zero TypeScript — solo JavaScript `.js` e `.vue` con JSDoc

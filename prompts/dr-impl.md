@@ -32,20 +32,37 @@ Leggi questi file:
 
 Per ogni stato significativo: fai `browser_snapshot` (accessibilità) e `browser_take_screenshot`.
 
-## Cosa valutare
+## Checklist Obbligatoria — Compila OGNI punto
 
-Analizza l'implementazione su queste dimensioni:
+Nel report, compila ogni punto della checklist con PASS o FAIL.
+Ogni FAIL diventa automaticamente una REV nel report.
 
-1. **Fedeltà alla specifica**: ogni criterio di accettazione è implementato correttamente?
-2. **Qualità estetica top-tier**: spaziatura generosa, tipografia gerarchica, micro-animazioni,
-   hover state fluidi su ogni elemento interattivo, transizioni su ogni cambio di stato?
-   Confronta con `ai-pipeline/conventions/visual.md` — ogni punto della checklist deve passare.
-3. **Qualità codice**: rispetta le conventions code (naming, struttura, no hardcoded values)?
-4. **Stati UI**: loading, empty, error e populated sono tutti gestiti e visivamente curati?
-5. **Responsività**: funziona su mobile (375px) e desktop (1440px) senza layout rotti?
-6. **Accessibilità**: attributi ARIA, focus management visibile, contrasto colori adeguato?
+### A. Code Quality (da code review statica)
+- [ ] Naming conventions rispettate (PascalCase componenti, camelCase funzioni)
+- [ ] Max 200 righe per .vue, max 20 righe per funzione
+- [ ] Zero valori CSS hardcoded (tutti design tokens)
+- [ ] Zero stringhe hardcoded visibili (tutte chiavi i18n)
+- [ ] JSDoc su props, emits, funzioni non banali
+- [ ] Struttura file Vue corretta (script setup → template → style)
+- [ ] Nessun console.log residuo
 
-Per ogni problema trovato, crea una revisione numerata (REV-001, REV-002, ...).
+### B. Visual Quality (da Playwright — VERIFICARE NEL BROWSER)
+- [ ] Hover state su OGNI elemento interattivo
+- [ ] Focus state visibile (:focus-visible con outline)
+- [ ] Transizioni su cambi di stato (0.15s-0.4s con var(--ease))
+- [ ] Responsive: layout integro a 375px e 1440px
+- [ ] Dark mode: colori si invertono correttamente
+- [ ] Spaziatura generosa e consistente (design tokens)
+- [ ] Tipografia gerarchica (titoli > sottotitoli > body)
+- [ ] Allineamenti precisi, nessun elemento sfasato
+
+### C. Functional Completeness (da specifica)
+- [ ] Ogni criterio di accettazione implementato
+- [ ] Stati UI gestiti: loading, empty, error, populated
+- [ ] Edge cases coperti
+- [ ] Attributi ARIA e accessibilità basilare
+
+**Ogni punto FAIL diventa una REV. NON approvare se anche UN solo punto fallisce.**
 
 ## Output Report
 

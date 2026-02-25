@@ -43,6 +43,42 @@ state_step_done() {
     local elapsed="$2"
     local retries="${3:-0}"
     _state_update_step "$step" "completed" "$retries" "" "$elapsed"
+    # Registra token usage se disponibile
+    if [[ "${CLAUDE_LAST_INPUT_TOKENS:-0}" -gt 0 ]] || [[ "${CLAUDE_LAST_OUTPUT_TOKENS:-0}" -gt 0 ]]; then
+        _state_set_step_tokens "$step" "${CLAUDE_LAST_INPUT_TOKENS:-0}" "${CLAUDE_LAST_OUTPUT_TOKENS:-0}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# state_get_total_cost
+# Calcola e restituisce il costo totale stimato (USD) basato sui token registrati.
+# ---------------------------------------------------------------------------
+state_get_total_cost() {
+    [[ ! -f "$PIPELINE_STATE_FILE" ]] && echo "" && return
+    python3 - "$PIPELINE_STATE_FILE" <<'PYEOF'
+import sys, json
+
+try:
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+except:
+    sys.exit(0)
+
+total_input = 0
+total_output = 0
+for step_name, step_data in data.get("steps", {}).items():
+    total_input += step_data.get("input_tokens", 0)
+    total_output += step_data.get("output_tokens", 0)
+
+if total_input == 0 and total_output == 0:
+    sys.exit(0)
+
+# Pricing approssimativo (Sonnet 4.6: $3/MTok input, $15/MTok output)
+# Opus 4.6: $15/MTok input, $75/MTok output
+# Usiamo una media conservativa
+cost = (total_input * 3.0 / 1_000_000) + (total_output * 15.0 / 1_000_000)
+print(f"{cost:.2f}")
+PYEOF
 }
 
 # ---------------------------------------------------------------------------
@@ -182,6 +218,32 @@ if elapsed:
 if step_status == 'in_progress':
     data['current_step'] = step
 data['updated_at'] = now
+
+with open(sys.argv[1], 'w') as f:
+    json.dump(data, f, indent=2)
+PYEOF
+}
+
+_state_set_step_tokens() {
+    local step="$1"
+    local input_tokens="$2"
+    local output_tokens="$3"
+
+    [[ ! -f "$PIPELINE_STATE_FILE" ]] && return
+
+    python3 - "$PIPELINE_STATE_FILE" "$step" "$input_tokens" "$output_tokens" <<'PYEOF'
+import sys, json
+
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+
+step = sys.argv[2]
+input_t = int(sys.argv[3])
+output_t = int(sys.argv[4])
+
+if step in data.get("steps", {}):
+    data["steps"][step]["input_tokens"] = input_t
+    data["steps"][step]["output_tokens"] = output_t
 
 with open(sys.argv[1], 'w') as f:
     json.dump(data, f, indent=2)

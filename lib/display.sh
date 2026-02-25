@@ -162,19 +162,21 @@ display_box_start() {
     printf "  ${BOLD}${CYAN}+----------------------------------------------------------+${NC}\n"
     printf "\n"
 
-    # Timer live a 2 righe su /dev/tty
+    # Timer live a 3 righe su /dev/tty
     # Riga 1: spinner + elapsed + ultimo tool regolare
     # Riga 2: stato playwright (URL + ultima azione browser)
+    # Riga 3: pipeline overview (step completati/in corso/pending)
     local start_epoch="$_SPINNER_START_EPOCH"
     local tmpdir="$_SPINNER_TMPDIR"
+    local state_file="${PIPELINE_STATE_FILE:-}"
     (
         set +euo pipefail 2>/dev/null || true
         local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
         local spin_len=10
         local i=0
 
-        # Riserva 2 righe
-        printf '\n\n' > /dev/tty
+        # Riserva 3 righe
+        printf '\n\n\n' > /dev/tty
 
         while true; do
             local now elapsed mins secs
@@ -209,8 +211,8 @@ display_box_start() {
                 display_tool="${act_tool##*__}"
             fi
 
-            # Torna su 2 righe e sovrascrive
-            printf '\033[2A' > /dev/tty
+            # Torna su 3 righe e sovrascrive
+            printf '\033[3A' > /dev/tty
 
             # Riga 1: spinner + tempo + ultimo tool
             if [[ -n "$act_tool" ]]; then
@@ -230,6 +232,41 @@ display_box_start() {
                     "${short_url:0:32}" "${pw_act:-…}" > /dev/tty
             else
                 printf '\r\033[2K\n' > /dev/tty
+            fi
+
+            # Riga 3: pipeline overview (ogni ~2s per ridurre I/O)
+            if [[ $(( i % 13 )) -eq 0 ]] && [[ -n "$state_file" ]] && [[ -f "$state_file" ]]; then
+                local overview
+                overview=$(python3 - "$state_file" 2>/dev/null <<'PYEOF' || true
+import sys, json
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+    steps = d.get("steps", {})
+    parts = []
+    for name, info in steps.items():
+        s = info.get("status", "pending")
+        if s == "completed":
+            parts.append(f"\033[0;32m✓{name}\033[0m")
+        elif s == "in_progress":
+            parts.append(f"\033[0;36m⠸{name}\033[0m")
+        elif s == "failed":
+            parts.append(f"\033[0;31m✗{name}\033[0m")
+        else:
+            parts.append(f"\033[2m○{name}\033[0m")
+    print(" ".join(parts))
+except:
+    pass
+PYEOF
+)
+                if [[ -n "$overview" ]]; then
+                    printf '\r\033[2K  %b\n' "$overview" > /dev/tty
+                else
+                    printf '\r\033[2K\n' > /dev/tty
+                fi
+            else
+                # Mantieni riga 3 ma non aggiornare
+                printf '\r\033[2K\n' > /dev/tty 2>/dev/null || printf '\n' > /dev/tty
             fi
 
             i=$(( i + 1 ))
@@ -256,6 +293,16 @@ display_box_add_action() {
 
     # Contatore azioni (una riga per azione — wc -l in display_box_stop)
     printf '1\n' >> "$_SPINNER_TMPDIR/count" 2>/dev/null || true
+
+    # Contatore per tipo di tool (per summary in display_box_stop)
+    local tool_type="$tool"
+    # Normalizza MCP tool names
+    if [[ "$tool" == *"playwright"* ]]; then
+        tool_type="Playwright"
+    elif [[ "$tool" == mcp__*__* ]]; then
+        tool_type="${tool##*__}"
+    fi
+    printf '%s\n' "$tool_type" >> "$_SPINNER_TMPDIR/tool_types" 2>/dev/null || true
 
     if [[ "$tool" == *"playwright"*"browser_"* ]]; then
         # Tool playwright (pipeline mcp__playwright__* o plugin mcp__plugin_playwright_*) — aggiorna riga 2
@@ -311,12 +358,21 @@ display_box_stop() {
             action_count=$(wc -l < "$_SPINNER_TMPDIR/count" | tr -d ' ' 2>/dev/null || echo 0)
         fi
 
-        # Sovrascrive le 2 righe del spinner con il messaggio finale
-        printf '\033[2A\r\033[2K  %b✓%b  Step %b%s%b completato in %b%dm%02ds%b  %b(%d azioni)%b\n\r\033[2K\n' \
+        # Summary per tipo di tool
+        local tool_summary=""
+        if [[ -n "$_SPINNER_TMPDIR" && -f "$_SPINNER_TMPDIR/tool_types" ]]; then
+            tool_summary=$(sort "$_SPINNER_TMPDIR/tool_types" 2>/dev/null | uniq -c | sort -rn | \
+                awk '{printf "%s:%d ", $2, $1}' | sed 's/ $//' 2>/dev/null || true)
+        fi
+
+        # Sovrascrive le 3 righe del spinner con il messaggio finale
+        local summary_text="${action_count} azioni"
+        [[ -n "$tool_summary" ]] && summary_text="${action_count} azioni: ${tool_summary}"
+        printf '\033[3A\r\033[2K  %b✓%b  Step %b%s%b completato in %b%dm%02ds%b  %b(%s)%b\n\r\033[2K\n\r\033[2K\n' \
             "$GREEN" "$NC" \
             "$BOLD" "$_SPINNER_STEP_NAME" "$NC" \
             "$GREEN" "$mins" "$secs" "$NC" \
-            "$DIM" "$action_count" "$NC" > /dev/tty
+            "$DIM" "$summary_text" "$NC" > /dev/tty
     fi
 
     if [[ -n "$_SPINNER_TMPDIR" ]]; then
@@ -509,6 +565,31 @@ display_gate_result() {
 }
 
 # ---------------------------------------------------------------------------
+# display_retry_banner <step> <retry_num> <max_retries> [reason]
+# Mostra un banner compatto tra i retry.
+# ---------------------------------------------------------------------------
+display_retry_banner() {
+    local step="$1"
+    local retry_num="$2"
+    local max_retries="$3"
+    local reason="${4:-}"
+
+    local reason_str=""
+    [[ -n "$reason" ]] && reason_str=" → ${reason}"
+
+    printf "\n"
+    printf "  ${YELLOW}+----------------------------------------------------------+${NC}\n"
+    printf "  ${YELLOW}|${NC}  ${BOLD}↺ Retry %s/%s${NC}  ${DIM}%s%s${NC}" \
+        "$retry_num" "$max_retries" "$step" "$reason_str"
+    # Pad to box width
+    local content_len=$(( 12 + ${#retry_num} + ${#max_retries} + ${#step} + ${#reason_str} ))
+    local padding=$(( 56 - content_len ))
+    [[ $padding -gt 0 ]] && printf "%*s" "$padding" ""
+    printf "${YELLOW}|${NC}\n"
+    printf "  ${YELLOW}+----------------------------------------------------------+${NC}\n"
+}
+
+# ---------------------------------------------------------------------------
 # display_success <feature> <elapsed> [output_file...]
 # ---------------------------------------------------------------------------
 display_success() {
@@ -522,6 +603,14 @@ display_success() {
     printf "  ${GREEN}|${NC}  ${BOLD}${GREEN}Pipeline completata${NC}  ${DIM}%s${NC}%*s${GREEN}|${NC}\n" \
         "$elapsed" $(( 27 - ${#elapsed} )) ""
     printf "  ${GREEN}|${NC}  Feature: ${BOLD}%-50s${GREEN}|${NC}\n" "$feature"
+
+    # Mostra costo stimato se disponibile
+    local total_cost
+    total_cost=$(state_get_total_cost 2>/dev/null || true)
+    if [[ -n "$total_cost" && "$total_cost" != "0" ]]; then
+        printf "  ${GREEN}|${NC}  ${DIM}Costo stimato: ~\$%-40s${NC}${GREEN}|${NC}\n" "$total_cost"
+    fi
+
     printf "  ${GREEN}|${NC}%*s${GREEN}|${NC}\n" 58 ""
     for f in "${files[@]}"; do
         printf "  ${GREEN}|${NC}  ${DIM}%-56s${NC}${GREEN}|${NC}\n" "$f"
@@ -539,12 +628,31 @@ _notify() {
     local title="$1"
     local msg="$2"
     local subtitle="${3:-}"
-    [[ "$(uname)" != "Darwin" ]] && return 0
-    command -v osascript &>/dev/null || return 0
-    if [[ -n "$subtitle" ]]; then
-        osascript -e "display notification \"${msg}\" with title \"${title}\" subtitle \"${subtitle}\"" &>/dev/null || true
-    else
-        osascript -e "display notification \"${msg}\" with title \"${title}\"" &>/dev/null || true
+
+    # macOS
+    if [[ "$(uname)" == "Darwin" ]] && command -v osascript &>/dev/null; then
+        if [[ -n "$subtitle" ]]; then
+            osascript -e "display notification \"${msg}\" with title \"${title}\" subtitle \"${subtitle}\"" &>/dev/null || true
+        else
+            osascript -e "display notification \"${msg}\" with title \"${title}\"" &>/dev/null || true
+        fi
+    fi
+
+    # Linux
+    if command -v notify-send &>/dev/null; then
+        notify-send "${title}" "${subtitle:+$subtitle — }${msg}" 2>/dev/null || true
+    fi
+
+    # Webhook opzionale
+    if [[ -n "${PIPELINE_CONFIG_FILE:-}" ]] && command -v curl &>/dev/null; then
+        local webhook_url
+        webhook_url=$(config_get_default "notifications.webhook_url" "" 2>/dev/null || true)
+        if [[ -n "$webhook_url" ]]; then
+            curl -s -X POST "$webhook_url" \
+                -H "Content-Type: application/json" \
+                -d "{\"title\":\"${title}\",\"message\":\"${msg}\",\"subtitle\":\"${subtitle}\"}" \
+                --max-time 5 &>/dev/null || true
+        fi
     fi
 }
 

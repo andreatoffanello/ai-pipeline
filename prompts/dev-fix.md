@@ -22,10 +22,23 @@ Questa è una **correzione mirata**, non una riscrittura.
 3. **Correggi** solo i problemi segnalati — non refactoring, non nuove feature
 4. **Verifica** che le correzioni rispettino le conventions lette
 
+## Dopo le correzioni — OBBLIGATORIO
+
+Dopo ogni correzione, verifica che non hai rotto nulla:
+
+1. **Esegui il lint**: `pnpm lint --no-fix`
+2. **Esegui il build**: `pnpm build`
+3. **Esegui i test**: `pnpm test --run` (se configurati)
+4. **Verifica visivamente** con Playwright che la correzione funzioni E che le
+   altre parti della feature non siano regredite
+
+La pipeline eseguirà automaticamente lint e build dopo questo step.
+Se non passano, dovrai correggere di nuovo.
+
 ## Vincoli non negoziabili
 
 - Modifica solo i file necessari a correggere i problemi del QA
-- Non riscrivere da zero — modifica le sezioni problematiche
+- Non riscrivere da zero — modifica le sezioni problematiche con Edit
 - Mantieni le stesse conventions del codice esistente
 - Non aggiungere feature non richieste dalla specifica
 
