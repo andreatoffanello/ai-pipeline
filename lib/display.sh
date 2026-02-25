@@ -600,11 +600,14 @@ display_success() {
         "$elapsed" $(( 27 - ${#elapsed} )) ""
     printf "  ${GREEN}|${NC}  Feature: ${BOLD}%-50s${GREEN}|${NC}\n" "$feature"
 
-    # Mostra costo stimato se disponibile
-    local total_cost
-    total_cost=$(state_get_total_cost 2>/dev/null || true)
-    if [[ -n "$total_cost" && "$total_cost" != "0" ]]; then
-        printf "  ${GREEN}|${NC}  ${DIM}Costo stimato: ~\$%-40s${NC}${GREEN}|${NC}\n" "$total_cost"
+    # Mostra token usage se disponibile
+    local total_tokens
+    total_tokens=$(state_get_total_tokens 2>/dev/null || true)
+    if [[ -n "$total_tokens" ]]; then
+        local tok_in="${total_tokens%%|*}"
+        local tok_out="${total_tokens##*|}"
+        printf "  ${GREEN}|${NC}  ${DIM}Tokens: %s in / %s out%-*s${NC}${GREEN}|${NC}\n" \
+            "$tok_in" "$tok_out" $(( 38 - ${#tok_in} - ${#tok_out} )) ""
     fi
 
     printf "  ${GREEN}|${NC}%*s${GREEN}|${NC}\n" 58 ""

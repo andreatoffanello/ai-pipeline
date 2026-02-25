@@ -82,6 +82,41 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
+# state_get_total_tokens
+# Restituisce "input_tokens|output_tokens" totali, formattati in K/M.
+# ---------------------------------------------------------------------------
+state_get_total_tokens() {
+    [[ ! -f "$PIPELINE_STATE_FILE" ]] && echo "" && return
+    python3 - "$PIPELINE_STATE_FILE" <<'PYEOF'
+import sys, json
+
+try:
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+except:
+    sys.exit(0)
+
+total_input = 0
+total_output = 0
+for step_name, step_data in data.get("steps", {}).items():
+    total_input += step_data.get("input_tokens", 0)
+    total_output += step_data.get("output_tokens", 0)
+
+if total_input == 0 and total_output == 0:
+    sys.exit(0)
+
+def fmt(n):
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    elif n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+print(f"{fmt(total_input)}|{fmt(total_output)}")
+PYEOF
+}
+
+# ---------------------------------------------------------------------------
 # state_step_fail <step_name> <reason>
 # ---------------------------------------------------------------------------
 state_step_fail() {
