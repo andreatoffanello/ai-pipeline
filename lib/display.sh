@@ -162,21 +162,52 @@ display_box_start() {
     printf "  ${BOLD}${CYAN}+----------------------------------------------------------+${NC}\n"
     printf "\n"
 
-    # Timer live a 3 righe su /dev/tty
+    # Pipeline overview statica (stampata una volta, non aggiornata)
+    local state_file="${PIPELINE_STATE_FILE:-}"
+    if [[ -n "$state_file" ]] && [[ -f "$state_file" ]]; then
+        local overview
+        overview=$(python3 - "$state_file" 2>/dev/null <<'PYEOF' || true
+import sys, json
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+    steps = d.get("steps", {})
+    if not steps:
+        sys.exit(0)
+    parts = []
+    for name, info in steps.items():
+        s = info.get("status", "pending")
+        if s == "completed":
+            parts.append(f"\033[0;32m\u2713{name}\033[0m")
+        elif s == "in_progress":
+            parts.append(f"\033[0;36m\u2038{name}\033[0m")
+        elif s == "failed":
+            parts.append(f"\033[0;31m\u2717{name}\033[0m")
+        else:
+            parts.append(f"\033[2m\u25cb{name}\033[0m")
+    print(" ".join(parts))
+except:
+    pass
+PYEOF
+)
+        if [[ -n "$overview" ]]; then
+            printf "  %b\n" "$overview"
+        fi
+    fi
+
+    # Timer live a 2 righe su /dev/tty
     # Riga 1: spinner + elapsed + ultimo tool regolare
     # Riga 2: stato playwright (URL + ultima azione browser)
-    # Riga 3: pipeline overview (step completati/in corso/pending)
     local start_epoch="$_SPINNER_START_EPOCH"
     local tmpdir="$_SPINNER_TMPDIR"
-    local state_file="${PIPELINE_STATE_FILE:-}"
     (
         set +euo pipefail 2>/dev/null || true
         local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
         local spin_len=10
         local i=0
 
-        # Riserva 3 righe
-        printf '\n\n\n' > /dev/tty
+        # Riserva 2 righe
+        printf '\n\n' > /dev/tty
 
         while true; do
             local now elapsed mins secs
@@ -211,8 +242,8 @@ display_box_start() {
                 display_tool="${act_tool##*__}"
             fi
 
-            # Torna su 3 righe e sovrascrive
-            printf '\033[3A' > /dev/tty
+            # Torna su 2 righe e sovrascrive
+            printf '\033[2A' > /dev/tty
 
             # Riga 1: spinner + tempo + ultimo tool
             if [[ -n "$act_tool" ]]; then
@@ -232,41 +263,6 @@ display_box_start() {
                     "${short_url:0:32}" "${pw_act:-…}" > /dev/tty
             else
                 printf '\r\033[2K\n' > /dev/tty
-            fi
-
-            # Riga 3: pipeline overview (ogni ~2s per ridurre I/O)
-            if [[ $(( i % 13 )) -eq 0 ]] && [[ -n "$state_file" ]] && [[ -f "$state_file" ]]; then
-                local overview
-                overview=$(python3 - "$state_file" 2>/dev/null <<'PYEOF' || true
-import sys, json
-try:
-    with open(sys.argv[1]) as f:
-        d = json.load(f)
-    steps = d.get("steps", {})
-    parts = []
-    for name, info in steps.items():
-        s = info.get("status", "pending")
-        if s == "completed":
-            parts.append(f"\033[0;32m✓{name}\033[0m")
-        elif s == "in_progress":
-            parts.append(f"\033[0;36m⠸{name}\033[0m")
-        elif s == "failed":
-            parts.append(f"\033[0;31m✗{name}\033[0m")
-        else:
-            parts.append(f"\033[2m○{name}\033[0m")
-    print(" ".join(parts))
-except:
-    pass
-PYEOF
-)
-                if [[ -n "$overview" ]]; then
-                    printf '\r\033[2K  %b\n' "$overview" > /dev/tty
-                else
-                    printf '\r\033[2K\n' > /dev/tty
-                fi
-            else
-                # Mantieni riga 3 ma non aggiornare
-                printf '\r\033[2K\n' > /dev/tty 2>/dev/null || printf '\n' > /dev/tty
             fi
 
             i=$(( i + 1 ))
@@ -365,10 +361,10 @@ display_box_stop() {
                 awk '{printf "%s:%d ", $2, $1}' | sed 's/ $//' 2>/dev/null || true)
         fi
 
-        # Sovrascrive le 3 righe del spinner con il messaggio finale
+        # Sovrascrive le 2 righe del spinner con il messaggio finale
         local summary_text="${action_count} azioni"
         [[ -n "$tool_summary" ]] && summary_text="${action_count} azioni: ${tool_summary}"
-        printf '\033[3A\r\033[2K  %b✓%b  Step %b%s%b completato in %b%dm%02ds%b  %b(%s)%b\n\r\033[2K\n\r\033[2K\n' \
+        printf '\033[2A\r\033[2K  %b✓%b  Step %b%s%b completato in %b%dm%02ds%b  %b(%s)%b\n\r\033[2K\n' \
             "$GREEN" "$NC" \
             "$BOLD" "$_SPINNER_STEP_NAME" "$NC" \
             "$GREEN" "$mins" "$secs" "$NC" \

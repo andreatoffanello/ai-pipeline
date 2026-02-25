@@ -508,6 +508,7 @@ NON riscrivere file da zero. Usa Edit per modifiche mirate."
                     display_gate_result "$step_name" "REJECTED" "$elapsed_str" \
                         "→ retry ${on_reject} (${retries}/${max_retries})"
                     [[ -n "$output" ]] && display_rejected_summary "${PIPELINE_DIR}/${output}"
+                    display_retry_banner "$on_reject" "$retries" "$max_retries" "REJECTED by ${step_name}"
 
                     # Esegui on_reject step
                     if [[ -n "$on_reject" ]]; then
