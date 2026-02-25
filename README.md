@@ -105,11 +105,13 @@ ai-pipeline/
 ├── lib/
 │   ├── config.sh        # Parsing YAML
 │   ├── display.sh       # UI terminale (box, spinner, colori tool)
-│   ├── claude.sh        # Claude CLI execution + file change tracking
-│   ├── state.sh         # State management (pipeline + batch)
+│   ├── claude.sh        # Claude CLI execution + file change tracking + token tracking
+│   ├── state.sh         # State management (pipeline + batch + token usage)
 │   ├── verdict.sh       # Gate logic
 │   ├── prompt.sh        # Assemblaggio prompt (prompts.md o file statici)
-│   └── playwright.sh    # Dev server check + visual verification + screenshot
+│   ├── playwright.sh    # Dev server check + visual verification + screenshot
+│   ├── verify.sh        # Build/lint verification post-step
+│   └── context.sh       # Cross-step context sharing
 ├── prompts/             # Un file .md per agente (usati se prompts.md assente)
 ├── prompts.md           # Alternativa: tutti i prompt in un file con sezioni ##
 └── example/             # Template e prompt di esempio
@@ -131,8 +133,93 @@ ai-pipeline/
 │       ├── dr-impl/
 │       └── qa/
 ├── logs/                # Log stream-json + dev server
-├── state.json           # Stato pipeline corrente
+├── verify/              # Output dei comandi di verifica (lint, build)
+├── context/             # Contesto condiviso tra step (<feature>.json)
+├── state.json           # Stato pipeline corrente (include token usage)
 └── batch-state.json     # Stato batch (se batch mode)
+```
+
+## Verify (build/lint automatico)
+
+Dopo gli step `dev` e `dev-fix`, la pipeline esegue automaticamente comandi di verifica deterministica (build, lint, typecheck). Se un comando fallisce, gli errori vengono iniettati come contesto nel retry — l'agente riceve l'output esatto dell'errore e deve correggerlo.
+
+```yaml
+verify:
+  enabled: true
+  commands:
+    - name: lint
+      cmd: "pnpm lint --no-fix"
+    - name: build
+      cmd: "pnpm build"
+  after_steps:
+    - dev
+    - dev-fix
+```
+
+Disabilitare: `verify.enabled: false`.
+
+## Integration check
+
+Dopo che tutti i gate passano e la pipeline è completata, viene eseguito un check finale di integrazione. Esegue gli stessi comandi in sequenza come sanity check.
+
+```yaml
+integration:
+  enabled: true
+  commands:
+    - "pnpm lint --no-fix"
+    - "pnpm build"
+```
+
+Se il check fallisce, la pipeline avvisa ma non marca la feature come fallita (i gate AI hanno già approvato). Disabilitare: `integration.enabled: false`.
+
+## Model escalation on retry
+
+Se uno step fallisce al primo tentativo, può scalare automaticamente a un modello più potente per i retry successivi.
+
+```yaml
+steps:
+  - name: dev
+    model: claude-sonnet-4-6
+    model_on_retry: claude-opus-4-6  # dal 2° tentativo usa opus
+```
+
+## Context cross-step
+
+La pipeline mantiene un file `context/<feature>.json` che accumula i file modificati e gli step completati. Gli agenti successivi possono leggerlo per evitare di ri-esplorare il codebase da zero.
+
+```json
+{
+  "feature": "button-outline",
+  "files_modified": ["components/Button.vue", "composables/useButton.ts"],
+  "steps_completed": ["pm", "dr-spec", "dev"]
+}
+```
+
+Il contesto viene referenziato automaticamente nei prompt degli agenti.
+
+## Token tracking
+
+La pipeline traccia automaticamente i token (input/output) consumati da ogni step. I dati vengono salvati in `state.json` e mostrati nel box di completamento finale.
+
+```
+  +----------------------------------------------------------+
+  |  Pipeline completata  4m23s                              |
+  |  Feature: button-outline                                 |
+  |  Tokens: 208.0K in / 55.5K out                          |
+  +----------------------------------------------------------+
+```
+
+## Notifiche
+
+Supporto notifiche cross-platform per eventi pipeline (completamento, fallimento):
+
+- **macOS**: notifica nativa via `osascript`
+- **Linux**: `notify-send` (se disponibile)
+- **Webhook HTTP**: POST JSON a qualsiasi URL
+
+```yaml
+notifications:
+  webhook_url: "https://hooks.slack.com/services/..."  # opzionale
 ```
 
 ## Gate system
@@ -154,7 +241,7 @@ Se uno step fallisce o il gate è REJECTED, la pipeline ritenta fino a `defaults
 
 Se il modello non risponde per esaurimento token o rate limit, la pipeline:
 
-1. Rileva l'errore (exit code 75, pattern in stderr: `rate.?limit|over.?capacity|token|context.?length|overloaded`)
+1. Rileva l'errore (exit code 75, pattern specifici in stderr: `rate.?limit(ed)?`, `over.?capacity`, `context.?(window|length).?(exceed|limit)`, `model.?overloaded`, `too.?many.?tokens`, `token.?limit`, `quota.?exceed`)
 2. Attende con backoff esponenziale: `base_delay * 2^(attempt-1)` secondi
 3. Riprova fino a `token_max_retries` volte
 4. Mostra countdown in tempo reale nel terminale
@@ -274,21 +361,50 @@ Dopo lo step: `📸 N screenshot salvati → screenshots/<feature>/<step>/`
 
 ## Display terminale
 
-Header con timestamp e progress bar per step:
+Header con timestamp, progress bar, e overview degli step:
 
 ```
-  Progress: [████████████░░░░░░░░] 3/4
+  Progress: [████████████░░░░░░░░] 3/6
 
   +----------------------------------------------------------+
-  | ⚙️  dev                          (step 3/4)              |
+  | ⚙️  dev                          (step 3/6)              |
   |  Feature: button-outline  | Model: sonnet     | 14:22:01 |
   |  Tools: Read,Write,Edit,Bash,Glob,Grep                   |
+  |  ✓pm ✓dr-spec ▶dev ○dr-impl ○qa ○dev-fix                |
   +----------------------------------------------------------+
 
   |  Write   ButtonOutline.vue
   |  Edit    index.vue
   /  0m45s
 ```
+
+### Pipeline overview
+
+Una riga compatta mostra lo stato di tutti gli step:
+- `✓` verde = completato
+- `▶` cyan = in corso
+- `✗` rosso = fallito
+- `○` dim = pending
+
+### Contatori azioni per tool
+
+Al completamento di ogni step, il box mostra il totale azioni suddiviso per tipo di tool:
+
+```
+  ✓  Step dev completato in 5m23s  (42 azioni: Write:15 Edit:12 Read:8 Bash:5 Glob:2)
+```
+
+### Retry banner
+
+Quando un gate rigetta e la pipeline esegue retry, viene mostrato un banner compatto:
+
+```
+  +----------------------------------------------------------+
+  |  ↺ Retry 1/3  dev → REJECTED by dr-impl                 |
+  +----------------------------------------------------------+
+```
+
+### File modificati
 
 Dopo ogni step: file modificati con diff stat git (`+N -N`) e timestamp:
 
@@ -298,6 +414,18 @@ Dopo ogni step: file modificati con diff stat git (`+N -N`) e timestamp:
   +----------------------------------------------------------+
   |  components/ButtonOutline.vue      +142    14:22:48      |
   |  components/index.vue              +3 -1   14:22:49      |
+  +----------------------------------------------------------+
+```
+
+### Box di completamento
+
+Al termine della pipeline, mostra feature, tempo totale e token consumati:
+
+```
+  +----------------------------------------------------------+
+  |  Pipeline completata  4m23s                              |
+  |  Feature: button-outline                                 |
+  |  Tokens: 208.0K in / 55.5K out                          |
   +----------------------------------------------------------+
 ```
 
