@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased] — Bugfix: rate limit detection su stream-json
+
+### Bugfix `lib/claude.sh`
+
+- **`_claude_is_token_exhausted`**: aggiunto controllo sul log JSON (stdout) per evento `{"type":"rate_limit_event"}` emesso da Claude Code con `--output-format stream-json`. Prima veniva rilevato solo su stderr, causando il bypass del meccanismo di retry/wait e il fallimento immediato dopo 3 tentativi senza attesa.
+
+- **`_claude_rate_limit_delay`** (nuova funzione): calcola il delay ottimale prima del retry:
+  - Se il JSON contiene `resetsAt` (timestamp Unix dalla API), aspetta esattamente fino al reset (+10s buffer)
+  - Fallback: backoff esponenziale classico `base_delay * 2^(attempt-1)`
+
 ## [Unreleased] — Enhance Code Quality & Autonomy
 
 ### Nuovi File

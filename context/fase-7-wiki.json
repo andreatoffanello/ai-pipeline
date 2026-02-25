@@ -1,0 +1,10 @@
+{
+  "feature": "fase-7-wiki",
+  "files_modified": [
+    "/Users/andreatoffanello/GitHub/product-management/ai-pipeline/reviews/fase-7-wiki-spec.md",
+    "/Users/andreatoffanello/GitHub/product-management/ai-pipeline/verdicts/fase-7-wiki-dr-spec.verdict"
+  ],
+  "steps_completed": [
+    "dr-spec"
+  ]
+}

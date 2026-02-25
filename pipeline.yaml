@@ -19,6 +19,7 @@ defaults:
   token_max_retries: 5
   token_base_delay: 60
   token_backoff_multiplier: 2
+  token_max_wait: 1800          # attesa massima per rate limit (sec) — oltre: fail con istruzioni
 
 steps:
   - name: pm

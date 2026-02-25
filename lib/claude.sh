@@ -148,7 +148,12 @@ claude_run() {
                 rm -f "$files_tmp"
                 return 75
             fi
-            local delay=$(( CLAUDE_TOKEN_BASE_DELAY * ( 2 ** (attempt - 1) ) ))
+            # Prova a leggere resetsAt dal rate_limit_event nel log JSON
+            local delay
+            delay=$(_claude_rate_limit_delay "$log_file" "$attempt") || {
+                rm -f "$files_tmp"
+                return 75
+            }
             display_warn "Rate limit — attendo ${delay}s (tentativo ${attempt}/${CLAUDE_TOKEN_MAX_RETRIES})"
             _claude_countdown "$delay"
             continue
@@ -203,7 +208,63 @@ _claude_is_token_exhausted() {
             "$stderr_file" 2>/dev/null && return 0
     fi
 
+    # Claude Code stream-json emette rate_limit_event su stdout (nel log file)
+    # Formato: {"type":"rate_limit_event","rate_limit_info":{"status":"rejected",...}}
+    local log_file="${stderr_file%.stderr}"
+    if [[ -f "$log_file" ]]; then
+        grep -q '"type":"rate_limit_event"' "$log_file" 2>/dev/null && return 0
+    fi
+
     return 1
+}
+
+_claude_rate_limit_delay() {
+    local log_file="$1"
+    local attempt="$2"
+
+    # Prova a estrarre resetsAt da rate_limit_event nel log stream-json
+    if [[ -f "$log_file" ]]; then
+        local resets_at
+        resets_at=$(python3 -c "
+import sys, json
+
+try:
+    with open(sys.argv[1]) as f:
+        for line in f:
+            try:
+                d = json.loads(line)
+                if d.get('type') == 'rate_limit_event':
+                    info = d.get('rate_limit_info', {})
+                    resets = info.get('resetsAt')
+                    if resets:
+                        print(int(resets))
+                        sys.exit(0)
+            except:
+                continue
+except:
+    pass
+" "$log_file" 2>/dev/null || echo "")
+
+        if [[ -n "$resets_at" ]]; then
+            local now
+            now=$(date +%s)
+            local wait=$(( resets_at - now + 10 ))  # +10s buffer
+            local max_wait="${CLAUDE_TOKEN_MAX_WAIT:-1800}"  # default 30 min
+            if [[ $wait -gt 0 ]] && [[ $wait -le $max_wait ]]; then
+                echo "$wait"
+                return
+            elif [[ $wait -gt $max_wait ]]; then
+                local reset_time
+                reset_time=$(date -r "$resets_at" "+%H:%M" 2>/dev/null || echo "ore ${resets_at}")
+                display_warn "Rate limit: reset alle ${reset_time} (tra ${wait}s) — supera il limite massimo di attesa (${max_wait}s)"
+                display_error "Riprova manualmente dopo le ${reset_time}:  ./pipeline.sh ${PIPELINE_FEATURE} --from ${step_name}"
+                return 1
+            fi
+        fi
+    fi
+
+    # Fallback: backoff esponenziale classico
+    echo $(( CLAUDE_TOKEN_BASE_DELAY * ( 2 ** (attempt - 1) ) ))
 }
 
 _claude_countdown() {

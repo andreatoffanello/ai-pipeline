@@ -241,8 +241,13 @@ Se uno step fallisce o il gate è REJECTED, la pipeline ritenta fino a `defaults
 
 Se il modello non risponde per esaurimento token o rate limit, la pipeline:
 
-1. Rileva l'errore (exit code 75, pattern specifici in stderr: `rate.?limit(ed)?`, `over.?capacity`, `context.?(window|length).?(exceed|limit)`, `model.?overloaded`, `too.?many.?tokens`, `token.?limit`, `quota.?exceed`)
-2. Attende con backoff esponenziale: `base_delay * 2^(attempt-1)` secondi
+1. Rileva l'errore su **due canali**:
+   - stderr: pattern regex (`rate.?limit(ed)?`, `over.?capacity`, `context.?(window|length).?(exceed|limit)`, `model.?overloaded`, `too.?many.?tokens`, `token.?limit`, `quota.?exceed`)
+   - stdout JSON: evento `{"type":"rate_limit_event",...}` emesso da Claude Code con `--output-format stream-json`
+2. Calcola il delay di attesa:
+   - Se il JSON contiene `resetsAt` (timestamp Unix), aspetta esattamente fino a quel momento (+10s buffer)
+   - Se l'attesa supera `token_max_wait`: **fail immediato** con messaggio che indica l'orario di reset e il comando esatto da rieseguire
+   - Altrimenti: backoff esponenziale `base_delay * 2^(attempt-1)` secondi
 3. Riprova fino a `token_max_retries` volte
 4. Mostra countdown in tempo reale nel terminale
 
@@ -251,6 +256,7 @@ defaults:
   max_retries: 3              # retry per step (gate REJECTED o errore)
   token_max_retries: 5        # retry per token exhaustion
   token_base_delay: 60        # delay base in secondi (60, 120, 240, ...)
+  token_max_wait: 1800        # attesa massima per rate limit (sec) — default 30 min; oltre: fail con istruzioni
 ```
 
 ## Provider per step

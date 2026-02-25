@@ -812,7 +812,8 @@ _main() {
     # Configura token retry da YAML
     CLAUDE_TOKEN_MAX_RETRIES=$(config_get_default "defaults.token_max_retries" "5")
     CLAUDE_TOKEN_BASE_DELAY=$(config_get_default "defaults.token_base_delay" "60")
-    export CLAUDE_TOKEN_MAX_RETRIES CLAUDE_TOKEN_BASE_DELAY
+    CLAUDE_TOKEN_MAX_WAIT=$(config_get_default "defaults.token_max_wait" "1800")
+    export CLAUDE_TOKEN_MAX_RETRIES CLAUDE_TOKEN_BASE_DELAY CLAUDE_TOKEN_MAX_WAIT
 
     # Verifica dev server se almeno uno step attivo richiede playwright
     if [[ "$PIPELINE_DRY_RUN" != "true" ]]; then
