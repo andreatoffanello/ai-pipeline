@@ -137,11 +137,22 @@ prompt_build() {
         if [[ "$step" == "pm" ]]; then
             local brief
             brief=$(prompt_get_feature_brief "$feature") || return 1
-            printf "FEATURE: %s\nBRIEF:\n---\n%s\n---\n\n%s" "$feature" "$brief" "$content"
+            if [[ -n "$extra_context" ]]; then
+                # PM in modalità revisione: feedback + brief + prompt
+                printf "FEATURE: %s\nBRIEF:\n---\n%s\n---\n\n" "$feature" "$brief"
+                printf "╔══════════════════════════════════════════════════════════════╗\n"
+                printf "║  MODALITÀ REVISIONE — NON STAI SCRIVENDO UNA NUOVA SPEC     ║\n"
+                printf "╚══════════════════════════════════════════════════════════════╝\n\n"
+                printf "La tua spec è stata RIGETTATA dal Design Reviewer.\n"
+                printf "NON ri-esplorare il codebase da zero. NON riscrivere la spec da zero.\n\n"
+                printf "FEEDBACK DALLA REVISIONE (dr-spec):\n---\n%s\n---\n\n%s" "$extra_context" "$content"
+            else
+                printf "FEATURE: %s\nBRIEF:\n---\n%s\n---\n\n%s" "$feature" "$brief" "$content"
+            fi
             return 0
         fi
 
-        # Inietta feedback correzione
+        # Inietta feedback correzione (dev/dev-fix)
         if [[ -n "$extra_context" ]]; then
             printf "FEEDBACK DALLA REVISIONE:\n---\n%s\n---\n\n%s" "$extra_context" "$content"
             return 0
@@ -203,7 +214,24 @@ prompt_build() {
 
     # extra_context: feedback revisione o ri-validazione
     if [[ -n "$extra_context" ]]; then
-        if [[ "$step" == "pm" || "$step" == "dev" || "$step" == "dev-fix" ]]; then
+        if [[ "$step" == "pm" ]]; then
+            full_prompt+="╔══════════════════════════════════════════════════════════════╗"$'\n'
+            full_prompt+="║  MODALITÀ REVISIONE — NON STAI SCRIVENDO UNA NUOVA SPEC     ║"$'\n'
+            full_prompt+="╚══════════════════════════════════════════════════════════════╝"$'\n'$'\n'
+            full_prompt+="La tua spec è stata RIGETTATA dal Design Reviewer."$'\n'
+            full_prompt+="NON ri-esplorare il codebase da zero. NON riscrivere la spec da zero."$'\n'$'\n'
+            full_prompt+="PASSI OBBLIGATORI:"$'\n'
+            full_prompt+="1. Leggi PRIMA il feedback qui sotto — contiene le revisioni REV-001, REV-002, ecc."$'\n'
+            full_prompt+="2. Leggi la spec esistente: \${PIPELINE_DIR}/specs/${feature}.md"$'\n'
+            full_prompt+="3. Per OGNI REV nel feedback, individua la sezione della spec da correggere"$'\n'
+            full_prompt+="4. Applica le correzioni con Edit (modifiche mirate, non riscrittura totale)"$'\n'
+            full_prompt+="5. Aggiungi la sezione '## Revisioni applicate' in cima alla spec con TUTTE le REV"$'\n'
+            full_prompt+="6. Se il feedback elenca 5 REV, la sezione DEVE contenere 5 righe — nessuna esclusa"$'\n'$'\n'
+            full_prompt+="FEEDBACK DALLA REVISIONE (dr-spec):"$'\n'
+            full_prompt+="---"$'\n'
+            full_prompt+="${extra_context}"$'\n'
+            full_prompt+="---"$'\n'$'\n'
+        elif [[ "$step" == "dev" || "$step" == "dev-fix" ]]; then
             full_prompt+="IMPORTANTE: QUESTA È UNA CORREZIONE INCREMENTALE, NON UNA NUOVA IMPLEMENTAZIONE."$'\n'
             full_prompt+="Il file/implementazione attuale è già stato prodotto. NON ri-esplorare il codebase da zero."$'\n'
             full_prompt+="NON riscrivere file da zero. Usa il tool Edit per modifiche mirate alle sezioni indicate nel feedback."$'\n'
