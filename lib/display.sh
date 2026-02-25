@@ -180,7 +180,7 @@ try:
         if s == "completed":
             parts.append(f"\033[0;32m\u2713{name}\033[0m")
         elif s == "in_progress":
-            parts.append(f"\033[0;36m\u2038{name}\033[0m")
+            parts.append(f"\033[0;36m\u25b6{name}\033[0m")
         elif s == "failed":
             parts.append(f"\033[0;31m\u2717{name}\033[0m")
         else:
